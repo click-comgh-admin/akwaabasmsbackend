@@ -26,6 +26,14 @@ interface TokenData {
   orgName: string;
 }
 
+interface ExternalSchedule {
+  id: number;
+  name: string;
+  start_time: string;
+  end_time: string;
+  days: string[];
+}
+
 const app: Express = express();
 
 app.use(cors({
@@ -53,7 +61,6 @@ export const AppDataSource = new DataSource({
   logging: ["error", "warn"],
 });
 
-// Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy' });
 });
@@ -76,11 +83,20 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
       return;
     }
     const today = format(new Date(), 'yyyy-MM-dd');
-    const { data } = await axios.get(
+    const { data } = await axios.get<{ data: ExternalSchedule[] }>(
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
       { headers: { Authorization: `Token ${token}` } }
     );
-    res.json(data.data.map((s: any) => ({ id: s.id, name: s.name })));
+    
+    const formattedSchedules = data.data.map((s: ExternalSchedule) => ({
+      id: s.id,
+      name: s.name,
+      startTime: s.start_time,
+      endTime: s.end_time,
+      days: s.days || []
+    }));
+
+    res.json(formattedSchedules);
   } catch (error: unknown) {
     const err = error as AxiosError;
     res.status(500).json({ 
