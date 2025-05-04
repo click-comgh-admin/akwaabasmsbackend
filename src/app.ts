@@ -37,7 +37,7 @@ interface ExternalSchedule {
 const app: Express = express();
 
 app.use(cors({
-  origin: 'https://report-akwaaba.vercel.app',
+  origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000'],
   credentials: true
 }));
 
@@ -67,40 +67,41 @@ app.get('/health', (req: Request, res: Response) => {
 
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
+  
   if (!token || !clientCode) {
-    res.status(400).json({ error: 'Token and client code are required' });
-    return;
+    return res.status(400).json({ error: 'Token and client code are required' });
   }
+
   tokenStore.set(token, { clientCode, email, orgName });
-  res.json({ success: true });
+  return res.json({ success: true });
 });
 
 app.get('/api/schedules/available', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
-      res.status(401).json({ error: 'Authorization token required' });
-      return;
+      return res.status(401).json({ error: 'Authorization token required' });
     }
+
     const today = format(new Date(), 'yyyy-MM-dd');
     const { data } = await axios.get<{ data: ExternalSchedule[] }>(
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
       { headers: { Authorization: `Token ${token}` } }
     );
     
-    const formattedSchedules = data.data.map((s: ExternalSchedule) => ({
-      id: s.id,
-      name: s.name,
-      startTime: s.start_time,
-      endTime: s.end_time,
-      days: s.days || []
+    const formattedSchedules = data.data.map(schedule => ({
+      id: schedule.id,
+      name: schedule.name,
+      startTime: schedule.start_time,
+      endTime: schedule.end_time,
+      days: schedule.days || []
     }));
 
-    res.json(formattedSchedules);
-  } catch (error: unknown) {
+    return res.json(formattedSchedules);
+  } catch (error) {
     const err = error as AxiosError;
-    res.status(500).json({ 
-      error: "Failed to fetch schedules", 
+    return res.status(500).json({ 
+      error: "Failed to fetch schedules",
       details: err.message 
     });
   }
@@ -110,33 +111,43 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
-      return res.status(401).json({ success: false, error: 'Authorization token required' });
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Authorization token required' 
+      });
     }
+
     const { from, to, content } = req.body;
+    
     if (!from || !to || !content) {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields (from, to, content)'
       });
     }
+
     const smsService = new HubtelSMS(
       process.env.HUBTEL_CLIENT_ID!,
       process.env.HUBTEL_CLIENT_SECRET!
     );
+    
     const success = await smsService.sendSMS({ from, to, content });
+    
     if (!success) {
       return res.status(500).json({
         success: false,
         error: 'Failed to send SMS through Hubtel API'
       });
     }
+    
     return res.json({ success: true });
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error;
+    console.error('SMS send error:', err);
     return res.status(500).json({ 
       success: false,
       error: "Failed to send SMS",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -144,11 +155,11 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
 app.get("/api/sms/logs", async (req: Request, res: Response) => {
   try {
     const logs = await SMSLog.find({ order: { sentAt: "DESC" } });
-    res.json(logs);
-  } catch (error: unknown) {
+    return res.json(logs);
+  } catch (error) {
     const err = error as Error;
-    res.status(500).json({ 
-      error: "Failed to fetch logs", 
+    return res.status(500).json({ 
+      error: "Failed to fetch logs",
       details: err.message 
     });
   }
@@ -157,11 +168,11 @@ app.get("/api/sms/logs", async (req: Request, res: Response) => {
 app.get("/api/recipients/list", async (req: Request, res: Response) => {
   try {
     const recipients = await Recipient.find();
-    res.json(recipients);
-  } catch (error: unknown) {
+    return res.json(recipients);
+  } catch (error) {
     const err = error as Error;
-    res.status(500).json({ 
-      error: "Failed to fetch recipients", 
+    return res.status(500).json({ 
+      error: "Failed to fetch recipients",
       details: err.message 
     });
   }
@@ -175,18 +186,23 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
   const availablePort = await detect(desiredPort);
 
   if (availablePort !== desiredPort) {
-    console.warn(`⚠️  Port ${desiredPort} in use. Switching to ${availablePort}`);
+    console.warn(`Port ${desiredPort} in use. Using ${availablePort} instead`);
     process.env.PORT = availablePort.toString();
   }
 
   try {
+    console.log(`Connecting to database (attempt ${attempt}/${MAX_RETRIES})...`);
     await AppDataSource.initialize();
+    console.log("Database connected successfully");
     startApplicationServices(availablePort);
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error;
+    console.error(`Connection attempt ${attempt} failed:`, err.message);
+    
     if (attempt < MAX_RETRIES) {
       setTimeout(() => initializeDatabase(attempt + 1), RETRY_DELAY);
     } else {
+      console.error("Maximum connection attempts reached");
       process.exit(1);
     }
   }
@@ -197,13 +213,15 @@ const startApplicationServices = (port: number): void => {
     process.env.HUBTEL_CLIENT_ID!,
     process.env.HUBTEL_CLIENT_SECRET!
   );
+  
   const scheduleService = new ScheduleService();
   const attendanceService = new AttendanceService(
     process.env.ATTENDANCE_API_URL!,
     process.env.ATTENDANCE_API_TOKEN!
   );
+
   const server = app.listen(port, () => {
-    console.log(`🚀 Server running on port ${port}`);
+    console.log(`Server running on port ${port}`);
     scheduleBackgroundJobs(smsService, scheduleService, attendanceService);
   });
 
@@ -218,11 +236,16 @@ const scheduleBackgroundJobs = (
 ): void => {
   cron.scheduleJob("*/5 * * * *", async () => {
     try {
+      console.log("Running scheduled SMS jobs...");
       const pending = await scheduleService.getPendingSchedules();
+      console.log(`Found ${pending.length} pending schedules`);
+      
       for (const schedule of pending) {
         await processSchedule(schedule, smsService, scheduleService, attendanceService);
       }
-    } catch {}
+    } catch (error) {
+      console.error("Error in scheduled job:", error);
+    }
   });
 };
 
@@ -234,6 +257,8 @@ const processSchedule = async (
 ): Promise<void> => {
   try {
     const recipients = await scheduleService.getRecipients(schedule.id);
+    console.log(`Processing schedule ${schedule.id} for ${recipients.length} recipients`);
+    
     for (const recipient of recipients) {
       try {
         const data = await attendanceService.getAttendanceSummary(
@@ -242,30 +267,51 @@ const processSchedule = async (
           schedule.meetingEventId,
           schedule.lastSent
         );
+        
         const message = scheduleService.formatMessage(data, schedule.template);
         await smsService.sendSMS({
           from: schedule.senderName,
           to: recipient.phone,
           content: message,
         });
+        
         await scheduleService.updateLastSent(schedule.id);
-      } catch {}
+      } catch (error) {
+        console.error(`Failed to process recipient ${recipient.phone}:`, error);
+      }
     }
-  } catch {}
+  } catch (error) {
+    console.error(`Failed to process schedule ${schedule.id}:`, error);
+  }
 };
 
 const shutdown = (server: ReturnType<typeof app.listen>): void => {
+  console.log("Shutting down server...");
+  
   server.close(async () => {
+    console.log("Closing database connection...");
     if (AppDataSource.isInitialized) {
       await AppDataSource.destroy();
     }
+    console.log("Server shutdown complete");
     process.exit(0);
   });
-  setTimeout(() => process.exit(1), 10000);
+
+  setTimeout(() => {
+    console.error("Forcing shutdown after timeout");
+    process.exit(1);
+  }, 10000);
 };
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  res.status(500).json({ error: 'Internal Server Error' });
+  console.error("Unhandled error:", err);
+  res.status(500).json({ 
+    error: 'Internal Server Error',
+    details: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
 });
 
-initializeDatabase().catch(() => process.exit(1));
+initializeDatabase().catch((error) => {
+  console.error("Failed to initialize application:", error);
+  process.exit(1);
+});
