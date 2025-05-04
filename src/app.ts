@@ -9,6 +9,7 @@ import cron from "node-schedule";
 import { format } from 'date-fns';
 import axios, { AxiosError } from 'axios';
 import cors from "cors";
+import detect from "detect-port";
 
 import { DataSource } from "typeorm";
 import { Schedule } from "./entities/Schedule";
@@ -54,12 +55,10 @@ export const AppDataSource = new DataSource({
 
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
-  
   if (!token || !clientCode) {
     res.status(400).json({ error: 'Token and client code are required' });
     return;
   }
-
   tokenStore.set(token, { clientCode, email, orgName });
   res.json({ success: true });
 });
@@ -71,7 +70,6 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
       res.status(401).json({ error: 'Authorization token required' });
       return;
     }
-
     const today = format(new Date(), 'yyyy-MM-dd');
     const { data } = await axios.get(
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
@@ -91,35 +89,26 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
-      return res.status(401).json({ 
-        success: false,
-        error: 'Authorization token required' 
-      });
+      return res.status(401).json({ success: false, error: 'Authorization token required' });
     }
-
     const { from, to, content } = req.body;
-    
     if (!from || !to || !content) {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields (from, to, content)'
       });
     }
-
     const smsService = new HubtelSMS(
       process.env.HUBTEL_CLIENT_ID!,
       process.env.HUBTEL_CLIENT_SECRET!
     );
-    
     const success = await smsService.sendSMS({ from, to, content });
-    
     if (!success) {
       return res.status(500).json({
         success: false,
         error: 'Failed to send SMS through Hubtel API'
       });
     }
-    
     return res.json({ success: true });
   } catch (error: unknown) {
     const err = error as Error;
@@ -161,9 +150,17 @@ const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
 
 const initializeDatabase = async (attempt = 1): Promise<void> => {
+  const desiredPort = parseInt(process.env.PORT || '5000');
+  const availablePort = await detect(desiredPort);
+
+  if (availablePort !== desiredPort) {
+    console.warn(`⚠️  Port ${desiredPort} in use. Switching to ${availablePort}`);
+    process.env.PORT = availablePort.toString();
+  }
+
   try {
     await AppDataSource.initialize();
-    startApplicationServices();
+    startApplicationServices(availablePort);
   } catch (error: unknown) {
     const err = error as Error;
     if (attempt < MAX_RETRIES) {
@@ -174,20 +171,18 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
   }
 };
 
-const startApplicationServices = (): void => {
+const startApplicationServices = (port: number): void => {
   const smsService = new HubtelSMS(
     process.env.HUBTEL_CLIENT_ID!,
     process.env.HUBTEL_CLIENT_SECRET!
   );
-  
   const scheduleService = new ScheduleService();
   const attendanceService = new AttendanceService(
     process.env.ATTENDANCE_API_URL!,
     process.env.ATTENDANCE_API_TOKEN!
   );
-
-  const PORT = Number(process.env.PORT || 5000);
-  const server = app.listen(PORT, () => {
+  const server = app.listen(port, () => {
+    console.log(`🚀 Server running on port ${port}`);
     scheduleBackgroundJobs(smsService, scheduleService, attendanceService);
   });
 
@@ -206,9 +201,7 @@ const scheduleBackgroundJobs = (
       for (const schedule of pending) {
         await processSchedule(schedule, smsService, scheduleService, attendanceService);
       }
-    } catch (error: unknown) {
-      const err = error as Error;
-    }
+    } catch {}
   });
 };
 
@@ -235,13 +228,9 @@ const processSchedule = async (
           content: message,
         });
         await scheduleService.updateLastSent(schedule.id);
-      } catch (error: unknown) {
-        const err = error as Error;
-      }
+      } catch {}
     }
-  } catch (error: unknown) {
-    const err = error as Error;
-  }
+  } catch {}
 };
 
 const shutdown = (server: ReturnType<typeof app.listen>): void => {
@@ -251,17 +240,11 @@ const shutdown = (server: ReturnType<typeof app.listen>): void => {
     }
     process.exit(0);
   });
-
-  setTimeout(() => {
-    process.exit(1);
-  }, 10000);
+  setTimeout(() => process.exit(1), 10000);
 };
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-initializeDatabase().catch((error: unknown) => {
-  const err = error as Error;
-  process.exit(1);
-});
+initializeDatabase().catch(() => process.exit(1));
