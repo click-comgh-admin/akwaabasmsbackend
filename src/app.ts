@@ -53,6 +53,11 @@ export const AppDataSource = new DataSource({
   logging: ["error", "warn"],
 });
 
+// Health check endpoint
+app.get('/health', (req: Request, res: Response) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
   if (!token || !clientCode) {
