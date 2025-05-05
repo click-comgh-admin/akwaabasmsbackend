@@ -2,11 +2,14 @@
   "name": "sms-backend",
   "version": "1.0.0",
   "main": "dist/app.js",
-  "scripts": {
-    "build": "tsc && copyfiles src/ca-certificate.crt dist",
-    "serve": "ts-node-dev --respawn --transpile-only src/app.ts",
-    "start": "node dist/app.js"
-  },
+    "scripts": {
+      "build": "tsc && copyfiles src/ca-certificate.crt dist",
+      "serve": "ts-node-dev --respawn --transpile-only src/app.ts",
+      "start": "node dist/app.js",
+      "migration:generate": "typeorm-ts-node-commonjs migration:generate src/migrations/Migration -d src/data-source.ts",
+      "migration:run": "RUN_MIGRATIONS=true ts-node src/app.ts",
+      "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts"
+    },
   "keywords": [],
   "author": "",
   "license": "ISC",
