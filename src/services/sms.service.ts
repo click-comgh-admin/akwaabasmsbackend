@@ -12,6 +12,11 @@ export class HubtelSMS {
     to: string;
     content: string;
   }): Promise<boolean> {
+    // Validate content length
+    if (params.content.length > 160) {
+      throw new Error('Message content exceeds maximum length of 160 characters');
+    }
+
     try {
       const baseUrl = 'https://sms.hubtel.com/v1/messages/send';
       const queryParams = new URLSearchParams({
@@ -22,7 +27,9 @@ export class HubtelSMS {
         content: params.content
       });
 
-      const response = await axios.get(`${baseUrl}?${queryParams.toString()}`);
+      const response = await axios.get(`${baseUrl}?${queryParams.toString()}`, {
+        timeout: 10000 // 10 second timeout
+      });
       
       const log = new SMSLog();
       log.recipient = params.to;
@@ -44,6 +51,7 @@ export class HubtelSMS {
       log.response = err.response?.data || err.message;
       await log.save();
 
+      console.error('SMS sending failed:', err.message);
       return false;
     }
   }

@@ -94,7 +94,10 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
     const today = format(new Date(), 'yyyy-MM-dd');
     const { data } = await axios.get(
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
-      { headers: { Authorization: `Token ${token}` } }
+      { 
+        headers: { Authorization: `Token ${token}` },
+        timeout: 10000 // 10 second timeout
+      }
     );
     
     return res.json(data.data.map((schedule: any) => ({
@@ -165,7 +168,8 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
         },
         headers: { 
           Authorization: `Token ${token}` 
-        }
+        },
+        timeout: 10000 // 10 second timeout
       }
     );
 
@@ -212,6 +216,14 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
       });
     }
 
+    // Validate content length
+    if (content.length > 160) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message content exceeds maximum length of 160 characters'
+      });
+    }
+
     const smsService = new HubtelSMS(
       process.env.HUBTEL_CLIENT_ID!,
       process.env.HUBTEL_CLIENT_SECRET!
@@ -240,8 +252,10 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
     console.error('Failed to send SMS:', err);
     return res.status(500).json({ 
       success: false,
-      error: "Failed to send SMS",
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: err.message.includes('160 character') 
+        ? err.message 
+        : "Failed to send SMS",
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
@@ -267,6 +281,14 @@ app.get("/api/recipients/list", async (req: Request, res: Response) => {
   } catch (error) {
     const err = error as Error;
     console.error('Failed to fetch recipients:', err);
+    
+    if (err.message.includes('column') && err.message.includes('does not exist')) {
+      return res.status(500).json({ 
+        error: "Database schema mismatch - please run migrations",
+        details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
+    }
+    
     return res.status(500).json({ 
       error: "Failed to fetch recipients", 
       details: process.env.NODE_ENV === 'development' ? err.message : undefined

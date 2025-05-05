@@ -7,8 +7,9 @@
     "serve": "ts-node-dev --respawn --transpile-only src/app.ts",
     "start": "node dist/app.js",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate src/migrations/Migration -d src/data-source.ts",
-    "migration:run": "RUN_MIGRATIONS=true ts-node src/app.ts",
-    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts"
+    "migration:run": "cross-env RUN_MIGRATIONS=true ts-node src/app.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
+    "migration:create": "typeorm-ts-node-commonjs migration:create src/migrations/AddFrequencyToRecipient"
   },
   "keywords": [],
   "author": "",
@@ -35,6 +36,7 @@
     "@types/node": "^22.15.3",
     "@types/node-schedule": "^2.1.7",
     "copyfiles": "^2.4.1",
+    "cross-env": "^7.0.3",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.0.0"
   }

@@ -17,8 +17,17 @@ export class ScheduleService {
       .getMany();
   }
 
-  async getRecipients(scheduleId: number) {
-    return Recipient.findBy({ scheduleId });
+  async getRecipients(scheduleId: number, maxRetries = 3) {
+    let lastError;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await Recipient.findBy({ scheduleId });
+      } catch (error) {
+        lastError = error;
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+      }
+    }
+    throw lastError;
   }
 
   async updateLastSent(scheduleId: number) {
@@ -54,12 +63,18 @@ export class ScheduleService {
   }
 
   formatMessage(data: any, template: string) {
-    return template
+    const message = template
       .replace('[Name]', data.name)
       .replace('[ClockIns]', data.clockIns)
       .replace('[LateDays]', data.lateDays)
       .replace('[AbsentDays]', data.absentDays)
       .replace('[TotalHours]', data.totalHours)
       .replace('[Month]', data.month);
+
+    if (message.length > 160) {
+      throw new Error('Formatted message exceeds 160 character limit');
+    }
+
+    return message;
   }
 }
