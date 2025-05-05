@@ -1,4 +1,4 @@
-import { BaseEntity,Entity, PrimaryGeneratedColumn, Column } from "typeorm";
+import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from "typeorm";
 
 @Entity()
 export class Recipient extends BaseEntity {
@@ -10,5 +10,13 @@ export class Recipient extends BaseEntity {
 
   @Column()
   scheduleId!: number;
-}
 
+  @Column()
+  frequency!: string; // 'Daily', 'Weekly', 'Monthly', 'Quarterly'
+
+  @Column({ type: 'timestamp' })
+  lastSent!: Date;
+
+  @Column()
+  messageType!: string;
+}

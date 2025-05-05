@@ -61,10 +61,12 @@ export const AppDataSource = new DataSource({
   logging: ["error", "warn"],
 });
 
+// Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy' });
 });
 
+// Token storage endpoint
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
   
@@ -76,6 +78,7 @@ app.post('/api/auth/store-token', (req: Request, res: Response) => {
   return res.json({ success: true });
 });
 
+// Get available schedules
 app.get('/api/schedules/available', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -107,24 +110,122 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
   }
 });
 
+// Get schedule details
+app.get('/api/schedules/details', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization token required' });
+    }
+
+    const { ids } = req.query;
+    if (!ids) {
+      return res.status(400).json({ error: 'Schedule IDs are required' });
+    }
+
+    const idList = (ids as string).split(',').map(Number);
+    const schedules = await Schedule.findByIds(idList);
+    
+    return res.json(schedules);
+  } catch (error) {
+    const err = error as Error;
+    return res.status(500).json({ 
+      error: "Failed to fetch schedule details",
+      details: err.message 
+    });
+  }
+});
+
+// Get attendance statistics
+app.get('/api/attendance/stats', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization token required' });
+    }
+
+    const { schedules } = req.query;
+    if (!schedules) {
+      return res.status(400).json({ error: 'Schedule IDs are required' });
+    }
+
+    const scheduleIds = (schedules as string).split(',').map(Number);
+    const today = format(new Date(), 'yyyy-MM-dd');
+    
+    const { data } = await axios.get(
+      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
+      {
+        params: {
+          filter_date: today,
+          meetingEventId: scheduleIds[0],
+          length: 1000
+        },
+        headers: { 
+          Authorization: `Token ${token}` 
+        }
+      }
+    );
+
+    const stats = {
+      totalAttendees: data.results.filter((r: any) => r.inTime).length,
+      maleCount: data.results.filter((r: any) => r.inTime && r.memberId.gender === 1).length,
+      femaleCount: data.results.filter((r: any) => r.inTime && r.memberId.gender === 2).length,
+      lateTotal: data.results.filter((r: any) => {
+        if (!r.inTime || !r.meetingEventId.latenessTime) return false;
+        const clockIn = new Date(r.inTime);
+        const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
+        return clockIn > latenessTime;
+      }).length,
+      absentTotal: data.results.filter((r: any) => !r.inTime).length,
+      absentMales: data.results.filter((r: any) => !r.inTime && r.memberId.gender === 1).length,
+      absentFemales: data.results.filter((r: any) => !r.inTime && r.memberId.gender === 2).length,
+      lateMales: data.results.filter((r: any) => {
+        if (!r.inTime || !r.meetingEventId.latenessTime) return false;
+        const clockIn = new Date(r.inTime);
+        const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
+        return clockIn > latenessTime && r.memberId.gender === 1;
+      }).length,
+      lateFemales: data.results.filter((r: any) => {
+        if (!r.inTime || !r.meetingEventId.latenessTime) return false;
+        const clockIn = new Date(r.inTime);
+        const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
+        return clockIn > latenessTime && r.memberId.gender === 2;
+      }).length
+    };
+
+    return res.json(stats);
+  } catch (error) {
+    const err = error as AxiosError;
+    return res.status(500).json({ 
+      error: "Failed to fetch attendance stats",
+      details: err.message 
+    });
+  }
+});
+
+// Send SMS endpoint
 app.post('/api/sms/send', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
-      return res.status(401).json({ 
-        success: false, 
-        error: 'Authorization token required' 
+      return res.status(401).json({ error: 'Authorization token required' });
+    }
+
+    const { from, to, content, frequency, scheduleId } = req.body;
+    
+    if (!from || !to || !content || !frequency || !scheduleId) {
+      return res.status(400).json({
+        error: 'Missing required fields (from, to, content, frequency, scheduleId)'
       });
     }
 
-    const { from, to, content } = req.body;
-    
-    if (!from || !to || !content) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields (from, to, content)'
-      });
-    }
+    const recipient = new Recipient();
+    recipient.phone = to;
+    recipient.frequency = frequency;
+    recipient.lastSent = new Date();
+    recipient.messageType = 'Attendance Summary';
+    recipient.scheduleId = scheduleId;
+    await recipient.save();
 
     const smsService = new HubtelSMS(
       process.env.HUBTEL_CLIENT_ID!,
@@ -135,7 +236,6 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
     
     if (!success) {
       return res.status(500).json({
-        success: false,
         error: 'Failed to send SMS through Hubtel API'
       });
     }
@@ -143,15 +243,14 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (error) {
     const err = error as Error;
-    console.error('SMS send error:', err);
     return res.status(500).json({ 
-      success: false,
       error: "Failed to send SMS",
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      details: err.message 
     });
   }
 });
 
+// Get SMS logs
 app.get("/api/sms/logs", async (req: Request, res: Response) => {
   try {
     const logs = await SMSLog.find({ order: { sentAt: "DESC" } });
@@ -165,6 +264,7 @@ app.get("/api/sms/logs", async (req: Request, res: Response) => {
   }
 });
 
+// Get recipients list
 app.get("/api/recipients/list", async (req: Request, res: Response) => {
   try {
     const recipients = await Recipient.find();
@@ -178,6 +278,7 @@ app.get("/api/recipients/list", async (req: Request, res: Response) => {
   }
 });
 
+// Database initialization and server startup
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
 
@@ -303,6 +404,7 @@ const shutdown = (server: ReturnType<typeof app.listen>): void => {
   }, 10000);
 };
 
+// Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ 
@@ -311,6 +413,7 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+// Initialize the application
 initializeDatabase().catch((error) => {
   console.error("Failed to initialize application:", error);
   process.exit(1);
