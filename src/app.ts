@@ -58,15 +58,13 @@ export const AppDataSource = new DataSource({
   },
   entities: [Schedule, SMSLog, Recipient],
   synchronize: process.env.NODE_ENV !== "production",
-  logging: ["error", "warn"],
+  logging: ["error", "warn", "query"],
 });
 
-// Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy' });
 });
 
-// Token storage endpoint
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
   
@@ -78,7 +76,6 @@ app.post('/api/auth/store-token', (req: Request, res: Response) => {
   return res.json({ success: true });
 });
 
-// Get available schedules
 app.get('/api/schedules/available', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -103,14 +100,14 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
     return res.json(formattedSchedules);
   } catch (error) {
     const err = error as AxiosError;
+    console.error('Failed to fetch schedules:', err.message);
     return res.status(500).json({ 
       error: "Failed to fetch schedules",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Get schedule details
 app.get('/api/schedules/details', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -129,14 +126,14 @@ app.get('/api/schedules/details', async (req: Request, res: Response) => {
     return res.json(schedules);
   } catch (error) {
     const err = error as Error;
+    console.error('Failed to fetch schedule details:', err.message);
     return res.status(500).json({ 
       error: "Failed to fetch schedule details",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Get attendance statistics
 app.get('/api/attendance/stats', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -196,89 +193,104 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
     return res.json(stats);
   } catch (error) {
     const err = error as AxiosError;
+    console.error('Failed to fetch attendance stats:', err.message);
     return res.status(500).json({ 
       error: "Failed to fetch attendance stats",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Send SMS endpoint
 app.post('/api/sms/send', async (req: Request, res: Response) => {
   try {
+    console.log('Received SMS send request:', req.body);
+    
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
+      console.error('Authorization token missing');
       return res.status(401).json({ error: 'Authorization token required' });
     }
 
     const { from, to, content, frequency, scheduleId } = req.body;
     
     if (!from || !to || !content || !frequency || !scheduleId) {
+      console.error('Missing required fields:', { from, to, content, frequency, scheduleId });
       return res.status(400).json({
         error: 'Missing required fields (from, to, content, frequency, scheduleId)'
       });
     }
 
+    console.log('Creating recipient record...');
     const recipient = new Recipient();
     recipient.phone = to;
     recipient.frequency = frequency;
     recipient.lastSent = new Date();
     recipient.messageType = 'Attendance Summary';
     recipient.scheduleId = scheduleId;
+    
     await recipient.save();
+    console.log('Recipient saved successfully');
 
+    console.log('Initializing SMS service...');
     const smsService = new HubtelSMS(
       process.env.HUBTEL_CLIENT_ID!,
       process.env.HUBTEL_CLIENT_SECRET!
     );
     
+    console.log('Sending SMS...');
     const success = await smsService.sendSMS({ from, to, content });
     
     if (!success) {
+      console.error('Failed to send SMS through Hubtel API');
       return res.status(500).json({
         error: 'Failed to send SMS through Hubtel API'
       });
     }
     
+    console.log('SMS sent successfully');
     return res.json({ success: true });
   } catch (error) {
     const err = error as Error;
+    console.error('Error in SMS send endpoint:', err);
     return res.status(500).json({ 
       error: "Failed to send SMS",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Get SMS logs
 app.get("/api/sms/logs", async (req: Request, res: Response) => {
   try {
+    console.log('Fetching SMS logs...');
     const logs = await SMSLog.find({ order: { sentAt: "DESC" } });
+    console.log(`Found ${logs.length} logs`);
     return res.json(logs);
   } catch (error) {
     const err = error as Error;
+    console.error('Failed to fetch logs:', err.message);
     return res.status(500).json({ 
       error: "Failed to fetch logs",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Get recipients list
 app.get("/api/recipients/list", async (req: Request, res: Response) => {
   try {
+    console.log('Fetching recipients list...');
     const recipients = await Recipient.find();
+    console.log(`Found ${recipients.length} recipients`);
     return res.json(recipients);
   } catch (error) {
     const err = error as Error;
+    console.error('Failed to fetch recipients:', err.message);
     return res.status(500).json({ 
       error: "Failed to fetch recipients",
-      details: err.message 
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-// Database initialization and server startup
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
 
@@ -404,16 +416,19 @@ const shutdown = (server: ReturnType<typeof app.listen>): void => {
   }, 10000);
 };
 
-// Error handling middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error("Unhandled error:", err);
+  console.error('Unhandled error:', err);
   res.status(500).json({ 
     error: 'Internal Server Error',
     details: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
-// Initialize the application
 initializeDatabase().catch((error) => {
   console.error("Failed to initialize application:", error);
   process.exit(1);
