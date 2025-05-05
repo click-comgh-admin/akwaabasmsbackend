@@ -9,6 +9,7 @@ import cron from "node-schedule";
 import { format } from 'date-fns';
 import axios, { AxiosError } from 'axios';
 import cors from "cors";
+import rateLimit from 'express-rate-limit';
 
 import { DataSource } from "typeorm";
 import { Schedule } from "./entities/Schedule";
@@ -27,18 +28,24 @@ interface TokenData {
 
 const app: Express = express();
 
-// Configure CORS and request body parsing
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000
+});
+
+// Middleware
 app.use(cors({
   origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000'],
   credentials: true
 }));
-
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use('/api/', apiLimiter);
 
 const tokenStore = new Map<string, TokenData>();
 
-// Database configuration
+// Database Configuration
 export const AppDataSource = new DataSource({
   type: "postgres",
   host: process.env.DB_HOST,
@@ -52,15 +59,17 @@ export const AppDataSource = new DataSource({
   },
   entities: [Schedule, SMSLog, Recipient],
   migrations: ["migrations/*.ts"],
-  migrationsRun: false, // We'll run migrations manually
-  synchronize: false, // Disable synchronize in production
+  synchronize: false,
   logging: ["error", "warn", "query"],
 });
 
-// Request logging middleware
-app.use((req: Request, res: Response, next: NextFunction) => {
-  console.log(`${req.method} ${req.path}`);
-  next();
+// Health Check Endpoint
+app.get('/health', (req: Request, res: Response) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    database: AppDataSource.isInitialized ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // API Endpoints
@@ -88,18 +97,97 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
       { headers: { Authorization: `Token ${token}` } }
     );
     
-    return res.json(data.data.map((s: any) => ({ 
-      id: s.id, 
-      name: s.name,
-      startTime: s.start_time,
-      endTime: s.end_time,
-      days: s.days || []
+    return res.json(data.data.map((schedule: any) => ({
+      id: schedule.id,
+      name: schedule.name,
+      startTime: schedule.start_time,
+      endTime: schedule.end_time,
+      days: schedule.days || []
     })));
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as AxiosError;
     console.error('Failed to fetch schedules:', err);
     return res.status(500).json({ 
-      error: "Failed to fetch schedules", 
+      error: "Failed to fetch schedules",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+app.get('/api/schedules/details', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization token required' });
+    }
+
+    const { ids } = req.query;
+    if (!ids) {
+      return res.status(400).json({ error: 'Schedule IDs are required' });
+    }
+
+    const idList = (ids as string).split(',').map(Number);
+    const schedules = await Schedule.findByIds(idList);
+    
+    return res.json(schedules);
+  } catch (error) {
+    const err = error as Error;
+    console.error('Failed to fetch schedule details:', err);
+    return res.status(500).json({ 
+      error: "Failed to fetch schedule details",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+app.get('/api/attendance/stats', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization token required' });
+    }
+
+    const { schedules } = req.query;
+    if (!schedules) {
+      return res.status(400).json({ error: 'Schedule IDs are required' });
+    }
+
+    const scheduleIds = (schedules as string).split(',').map(Number);
+    const today = format(new Date(), 'yyyy-MM-dd');
+    
+    const { data } = await axios.get(
+      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
+      {
+        params: {
+          filter_date: today,
+          meetingEventId: scheduleIds[0],
+          length: 1000
+        },
+        headers: { 
+          Authorization: `Token ${token}` 
+        }
+      }
+    );
+
+    const stats = {
+      totalAttendees: data.results.filter((r: any) => r.inTime).length,
+      maleCount: data.results.filter((r: any) => r.inTime && r.memberId.gender === 1).length,
+      femaleCount: data.results.filter((r: any) => r.inTime && r.memberId.gender === 2).length,
+      lateTotal: data.results.filter((r: any) => {
+        if (!r.inTime || !r.meetingEventId.latenessTime) return false;
+        const clockIn = new Date(r.inTime);
+        const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
+        return clockIn > latenessTime;
+      }).length,
+      absentTotal: data.results.filter((r: any) => !r.inTime).length
+    };
+
+    return res.json(stats);
+  } catch (error) {
+    const err = error as AxiosError;
+    console.error('Failed to fetch attendance stats:', err);
+    return res.status(500).json({ 
+      error: "Failed to fetch attendance stats",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
@@ -138,7 +226,6 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
       });
     }
 
-    // Save recipient information
     const recipient = new Recipient();
     recipient.phone = to;
     recipient.frequency = frequency;
@@ -148,7 +235,7 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
     await recipient.save();
     
     return res.json({ success: true });
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error;
     console.error('Failed to send SMS:', err);
     return res.status(500).json({ 
@@ -163,7 +250,7 @@ app.get("/api/sms/logs", async (req: Request, res: Response) => {
   try {
     const logs = await SMSLog.find({ order: { sentAt: "DESC" } });
     return res.json(logs);
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error;
     console.error('Failed to fetch logs:', err);
     return res.status(500).json({ 
@@ -177,7 +264,7 @@ app.get("/api/recipients/list", async (req: Request, res: Response) => {
   try {
     const recipients = await Recipient.find();
     return res.json(recipients);
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error;
     console.error('Failed to fetch recipients:', err);
     return res.status(500).json({ 
@@ -187,7 +274,7 @@ app.get("/api/recipients/list", async (req: Request, res: Response) => {
   }
 });
 
-// Background job scheduling
+// Background Jobs
 const scheduleBackgroundJobs = (
   smsService: HubtelSMS,
   scheduleService: ScheduleService,
@@ -235,28 +322,24 @@ const scheduleBackgroundJobs = (
   });
 };
 
-// Database initialization with retry logic
+// Database Initialization
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
 
 const initializeDatabase = async (attempt = 1): Promise<void> => {
   try {
     console.log(`Connecting to database (attempt ${attempt}/${MAX_RETRIES})...`);
-    
-    // Initialize connection
     await AppDataSource.initialize();
     console.log("Database connected successfully");
 
-    // Run pending migrations
     if (process.env.RUN_MIGRATIONS === 'true') {
       console.log("Running migrations...");
       await AppDataSource.runMigrations();
       console.log("Migrations completed");
     }
 
-    // Start application services
     startApplicationServices();
-  } catch (error: unknown) {
+  } catch (error) {
     const err = error as Error;
     console.error(`Connection attempt ${attempt} failed:`, err.message);
     
@@ -309,7 +392,7 @@ const shutdown = (server: ReturnType<typeof app.listen>): void => {
   }, 10000);
 };
 
-// Error handling middleware
+// Error Handling Middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -318,9 +401,8 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// Initialize application
-initializeDatabase().catch((error: unknown) => {
-  const err = error as Error;
-  console.error("Failed to initialize application:", err);
+// Start the application
+initializeDatabase().catch((error) => {
+  console.error("Failed to initialize application:", error);
   process.exit(1);
 });
