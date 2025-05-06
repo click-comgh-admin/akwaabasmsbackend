@@ -36,10 +36,10 @@ const apiLimiter = rateLimit({
 
 // Middleware
 app.use(cors({
-  origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000'],
+  origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000', 'https://alert.akwaabahr.com'],
   credentials: true
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/', apiLimiter);
 
