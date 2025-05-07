@@ -28,13 +28,11 @@ interface TokenData {
 
 const app: Express = express();
 
-// Rate limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000
 });
 
-// Middleware
 app.use(cors({
   origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000', 'https://alert.akwaabahr.com'],
   credentials: true
@@ -45,7 +43,6 @@ app.use('/api/', apiLimiter);
 
 const tokenStore = new Map<string, TokenData>();
 
-// Database Configuration
 export const AppDataSource = new DataSource({
   type: "postgres",
   host: process.env.DB_HOST,
@@ -63,7 +60,6 @@ export const AppDataSource = new DataSource({
   logging: ["error", "warn", "query"],
 });
 
-// Health Check Endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ 
     status: 'healthy',
@@ -72,7 +68,6 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// API Endpoints
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
   
@@ -96,7 +91,7 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
       { 
         headers: { Authorization: `Token ${token}` },
-        timeout: 10000 // 10 second timeout
+        timeout: 10000
       }
     );
     
@@ -143,7 +138,7 @@ app.get('/api/schedules/details', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/attendance/stats', async (req: Request, res: Response) => {
+app.get('/api/schedules/users', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
@@ -168,25 +163,92 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
         },
         headers: { 
           Authorization: `Token ${token}` 
-        },
-        timeout: 10000 // 10 second timeout
+        }
       }
     );
 
-    const stats = {
-      totalAttendees: data.results.filter((r: any) => r.inTime).length,
-      maleCount: data.results.filter((r: any) => r.inTime && r.memberId.gender === 1).length,
-      femaleCount: data.results.filter((r: any) => r.inTime && r.memberId.gender === 2).length,
-      lateTotal: data.results.filter((r: any) => {
-        if (!r.inTime || !r.meetingEventId.latenessTime) return false;
-        const clockIn = new Date(r.inTime);
-        const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
-        return clockIn > latenessTime;
-      }).length,
-      absentTotal: data.results.filter((r: any) => !r.inTime).length
-    };
+    const users = data.results
+      .filter((r: any) => r.memberId)
+      .map((r: any) => ({
+        id: r.memberId.id,
+        name: `${r.memberId.firstname} ${r.memberId.surname}`,
+        phone: r.memberId.phone,
+        gender: r.memberId.gender
+      }))
+      .filter((user: any, index: number, self: any[]) => 
+        index === self.findIndex((u) => u.id === user.id)
+      );
 
-    return res.json(stats);
+    return res.json(users);
+  } catch (error) {
+    const err = error as AxiosError;
+    console.error('Failed to fetch users:', err);
+    return res.status(500).json({ 
+      error: "Failed to fetch users",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+app.get('/api/attendance/stats', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization token required' });
+    }
+
+    const { schedules, isAdminMode } = req.query;
+    if (!schedules) {
+      return res.status(400).json({ error: 'Schedule IDs are required' });
+    }
+
+    const scheduleIds = (schedules as string).split(',').map(Number);
+    const today = format(new Date(), 'yyyy-MM-dd');
+    
+    const { data } = await axios.get(
+      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
+      {
+        params: {
+          filter_date: today,
+          meetingEventId: scheduleIds[0],
+          length: 1000
+        },
+        headers: { 
+          Authorization: `Token ${token}` 
+        }
+      }
+    );
+
+    const results = data.results;
+    
+    if (isAdminMode === 'true') {
+      const stats = {
+        totalAttendees: results.filter((r: any) => r.inTime).length,
+        maleCount: results.filter((r: any) => r.inTime && r.memberId.gender === 1).length,
+        femaleCount: results.filter((r: any) => r.inTime && r.memberId.gender === 2).length,
+        lateTotal: results.filter((r: any) => {
+          if (!r.inTime || !r.meetingEventId.latenessTime) return false;
+          const clockIn = new Date(r.inTime);
+          const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
+          return clockIn > latenessTime;
+        }).length,
+        absentTotal: results.filter((r: any) => !r.inTime).length
+      };
+      return res.json(stats);
+    }
+    
+    const userStats = results.map((r: any) => ({
+      id: r.memberId.id,
+      name: `${r.memberId.firstname} ${r.memberId.surname}`,
+      phone: r.memberId.phone,
+      clockIns: r.inTime ? 1 : 0,
+      clockOuts: r.outTime ? 1 : 0,
+      late: r.inTime && r.meetingEventId.latenessTime ? 
+        new Date(r.inTime) > new Date(`${today}T${r.meetingEventId.latenessTime}`) : false,
+      absent: !r.inTime
+    }));
+    
+    return res.json({ users: userStats });
   } catch (error) {
     const err = error as AxiosError;
     console.error('Failed to fetch attendance stats:', err);
@@ -216,7 +278,6 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
       });
     }
 
-    // Validate content length
     if (content.length > 160) {
       return res.status(400).json({
         success: false,
@@ -296,7 +357,6 @@ app.get("/api/recipients/list", async (req: Request, res: Response) => {
   }
 });
 
-// Background Jobs
 const scheduleBackgroundJobs = (
   smsService: HubtelSMS,
   scheduleService: ScheduleService,
@@ -344,7 +404,6 @@ const scheduleBackgroundJobs = (
   });
 };
 
-// Database Initialization
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
 
@@ -380,7 +439,11 @@ const startApplicationServices = (): void => {
     process.env.HUBTEL_CLIENT_SECRET!
   );
   
-  const scheduleService = new ScheduleService();
+  const scheduleService = new ScheduleService(
+    process.env.ATTENDANCE_API_URL!,
+    process.env.ATTENDANCE_API_TOKEN!
+  );
+  
   const attendanceService = new AttendanceService(
     process.env.ATTENDANCE_API_URL!,
     process.env.ATTENDANCE_API_TOKEN!
@@ -414,7 +477,6 @@ const shutdown = (server: ReturnType<typeof app.listen>): void => {
   }, 10000);
 };
 
-// Error Handling Middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -423,7 +485,6 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// Start the application
 initializeDatabase().catch((error) => {
   console.error("Failed to initialize application:", error);
   process.exit(1);
