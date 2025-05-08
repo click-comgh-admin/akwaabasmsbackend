@@ -210,19 +210,24 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Authorization token required' });
     }
 
-    const { schedules, phone, startDate, endDate } = req.query;
-    if (!schedules || !phone || !startDate || !endDate) {
+    const { scheduleId, phone, startDate, endDate } = req.query;
+    if (!scheduleId || !phone || !startDate || !endDate) {
       return res.status(400).json({ error: 'Required parameters missing' });
     }
 
-    const scheduleIds = (schedules as string).split(',').map(Number);
-    
+    // Validate date formats
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate as string) || 
+        !/^\d{4}-\d{2}-\d{2}$/.test(endDate as string)) {
+      return res.status(400).json({ error: 'Invalid date format. Use yyyy-mm-dd' });
+    }
+
     const { data } = await axios.get(
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
       {
         params: {
-          filter_date: `${startDate},${endDate}`,
-          meetingEventId: scheduleIds[0],
+          start_date: startDate,
+          end_date: endDate,
+          meetingEventId: scheduleId,  // Use scheduleId directly
           length: 1000
         },
         headers: { 
@@ -230,6 +235,7 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
         }
       }
     );
+
 
     const userRecords = data.results.filter((r: any) => 
       r.memberId?.phone === phone
@@ -240,7 +246,7 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
     }
 
     const scheduleResponse = await axios.get(
-      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/details/${scheduleIds[0]}`,
+      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/details/${scheduleId}`,
       {
         headers: { 
           Authorization: `Token ${token}` 
