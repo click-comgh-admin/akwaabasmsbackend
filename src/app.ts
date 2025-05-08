@@ -10,12 +10,10 @@ import { format } from 'date-fns';
 import axios, { AxiosError } from 'axios';
 import cors from "cors";
 import rateLimit from 'express-rate-limit';
-
 import { DataSource } from "typeorm";
 import { Schedule } from "./entities/Schedule";
 import { SMSLog } from "./entities/SMSLog";
 import { Recipient } from "./entities/Recipient";
-
 import { HubtelSMS } from "./services/sms.service";
 import { ScheduleService } from "./services/schedule.service";
 import { AttendanceService } from "./services/attendance.service";
@@ -27,11 +25,8 @@ interface TokenData {
 }
 
 const app: Express = express();
-
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000
-});
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 });
+const tokenStore = new Map<string, TokenData>();
 
 app.use(cors({
   origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000', 'https://alert.akwaabahr.com'],
@@ -40,8 +35,6 @@ app.use(cors({
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/', apiLimiter);
-
-const tokenStore = new Map<string, TokenData>();
 
 export const AppDataSource = new DataSource({
   type: "postgres",
@@ -100,7 +93,8 @@ app.get('/api/schedules/available', async (req: Request, res: Response) => {
       name: schedule.name,
       startTime: schedule.start_time,
       endTime: schedule.end_time,
-      days: schedule.days || []
+      days: schedule.days || [],
+      latenessTime: schedule.lateness_time
     })));
   } catch (error) {
     const err = error as AxiosError;
@@ -171,7 +165,8 @@ app.get('/api/schedules/users', async (req: Request, res: Response) => {
       .filter((r: any) => r.memberId)
       .map((r: any) => ({
         id: r.memberId.id,
-        name: `${r.memberId.firstname} ${r.memberId.surname}`,
+        firstName: r.memberId.firstname,
+        lastName: r.memberId.surname,
         phone: r.memberId.phone,
         gender: r.memberId.gender
       }))
@@ -190,6 +185,24 @@ app.get('/api/schedules/users', async (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/recipients/check', async (req: Request, res: Response) => {
+  try {
+    const { phone, scheduleId } = req.query;
+    const existing = await Recipient.findOneBy({ 
+      phone: phone as string,
+      scheduleId: Number(scheduleId)
+    });
+    return res.json({ exists: !!existing });
+  } catch (error) {
+    const err = error as Error;
+    console.error('Failed to check recipient:', err);
+    return res.status(500).json({ 
+      error: "Failed to check recipient",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
 app.get('/api/attendance/stats', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -197,19 +210,18 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Authorization token required' });
     }
 
-    const { schedules, isAdminMode } = req.query;
-    if (!schedules) {
-      return res.status(400).json({ error: 'Schedule IDs are required' });
+    const { schedules, phone, startDate, endDate } = req.query;
+    if (!schedules || !phone || !startDate || !endDate) {
+      return res.status(400).json({ error: 'Required parameters missing' });
     }
 
     const scheduleIds = (schedules as string).split(',').map(Number);
-    const today = format(new Date(), 'yyyy-MM-dd');
     
     const { data } = await axios.get(
       `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
       {
         params: {
-          filter_date: today,
+          filter_date: `${startDate},${endDate}`,
           meetingEventId: scheduleIds[0],
           length: 1000
         },
@@ -219,36 +231,72 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
       }
     );
 
-    const results = data.results;
-    
-    if (isAdminMode === 'true') {
-      const stats = {
-        totalAttendees: results.filter((r: any) => r.inTime).length,
-        maleCount: results.filter((r: any) => r.inTime && r.memberId.gender === 1).length,
-        femaleCount: results.filter((r: any) => r.inTime && r.memberId.gender === 2).length,
-        lateTotal: results.filter((r: any) => {
-          if (!r.inTime || !r.meetingEventId.latenessTime) return false;
-          const clockIn = new Date(r.inTime);
-          const latenessTime = new Date(`${today}T${r.meetingEventId.latenessTime}`);
-          return clockIn > latenessTime;
-        }).length,
-        absentTotal: results.filter((r: any) => !r.inTime).length
-      };
-      return res.json(stats);
+    const userRecords = data.results.filter((r: any) => 
+      r.memberId?.phone === phone
+    );
+
+    if (userRecords.length === 0) {
+      return res.status(404).json({ error: 'No attendance records found' });
     }
-    
-    const userStats = results.map((r: any) => ({
-      id: r.memberId.id,
-      name: `${r.memberId.firstname} ${r.memberId.surname}`,
-      phone: r.memberId.phone,
-      clockIns: r.inTime ? 1 : 0,
-      clockOuts: r.outTime ? 1 : 0,
-      late: r.inTime && r.meetingEventId.latenessTime ? 
-        new Date(r.inTime) > new Date(`${today}T${r.meetingEventId.latenessTime}`) : false,
-      absent: !r.inTime
-    }));
-    
-    return res.json({ users: userStats });
+
+    const scheduleResponse = await axios.get(
+      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/details/${scheduleIds[0]}`,
+      {
+        headers: { 
+          Authorization: `Token ${token}` 
+        }
+      }
+    );
+
+    const scheduleDetails = scheduleResponse.data;
+
+    let clockIns = 0;
+    let clockOuts = 0;
+    let lateDays = 0;
+    let absentDays = 0;
+    let totalWorkHours = 0;
+    let overtimeDays = 0;
+    let totalOvertime = 0;
+
+    userRecords.forEach((record: any) => {
+      if (record.inTime) {
+        clockIns++;
+        
+        const clockInTime = new Date(record.inTime);
+        const scheduleStart = new Date(`${record.date.split('T')[0]}T${scheduleDetails.start_time}`);
+        
+        if (clockInTime > scheduleStart) {
+          lateDays++;
+        }
+        
+        if (record.outTime) {
+          clockOuts++;
+          const clockOutTime = new Date(record.outTime);
+          const workHours = (clockOutTime.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
+          totalWorkHours += workHours;
+          
+          const scheduleEnd = new Date(`${record.date.split('T')[0]}T${scheduleDetails.end_time}`);
+          if (clockOutTime > scheduleEnd) {
+            overtimeDays++;
+            totalOvertime += (clockOutTime.getTime() - scheduleEnd.getTime()) / (1000 * 60 * 60);
+          }
+        }
+      } else {
+        absentDays++;
+      }
+    });
+
+    return res.json({
+      firstName: userRecords[0].memberId.firstname,
+      clockIns,
+      clockOuts,
+      lateDays,
+      absentDays,
+      totalWorkHours: Math.round(totalWorkHours),
+      overtimeDays,
+      totalOvertime: Math.round(totalOvertime),
+      scheduleName: scheduleDetails.name
+    });
   } catch (error) {
     const err = error as AxiosError;
     console.error('Failed to fetch attendance stats:', err);
@@ -282,6 +330,18 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         error: 'Message content exceeds maximum length of 160 characters'
+      });
+    }
+
+    const existing = await Recipient.findOneBy({ 
+      phone: to,
+      scheduleId: scheduleId
+    });
+    
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        error: 'Recipient already exists for this schedule'
       });
     }
 
@@ -420,9 +480,9 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
     }
 
     startApplicationServices();
-  } catch (error) {
-    const err = error as Error;
-    console.error(`Connection attempt ${attempt} failed:`, err.message);
+  } catch (err) {
+    const error = err as Error;
+    console.error(`Connection attempt ${attempt} failed:`, error.message);
     
     if (attempt < MAX_RETRIES) {
       setTimeout(() => initializeDatabase(attempt + 1), RETRY_DELAY);
