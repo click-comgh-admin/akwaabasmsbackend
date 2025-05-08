@@ -203,6 +203,43 @@ app.get('/api/recipients/check', async (req: Request, res: Response) => {
   }
 });
 
+app.delete('/api/recipients/:id', async (req: Request, res: Response) => {
+  try {
+    const recipient = await Recipient.findOneBy({ id: Number(req.params.id) });
+    if (!recipient) {
+      return res.status(404).json({ error: 'Recipient not found' });
+    }
+    await recipient.remove();
+    return res.json({ success: true });
+  } catch (error) {
+    const err = error as Error;
+    console.error('Failed to delete recipient:', err);
+    return res.status(500).json({ 
+      error: "Failed to delete recipient",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+app.delete('/api/recipients', async (req: Request, res: Response) => {
+  try {
+    const { type } = req.query;
+    const query = type === 'admin' 
+      ? { messageType: 'Admin Summary' } 
+      : { messageType: 'User Summary' };
+    
+    await Recipient.delete(query);
+    return res.json({ success: true });
+  } catch (error) {
+    const err = error as Error;
+    console.error('Failed to delete recipients:', err);
+    return res.status(500).json({ 
+      error: "Failed to delete recipients",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
 app.get('/api/attendance/stats', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -210,99 +247,142 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Authorization token required' });
     }
 
-    const { scheduleId, phone, startDate, endDate } = req.query;
+    const { scheduleId, phone, startDate, endDate, isAdmin } = req.query;
     if (!scheduleId || !phone || !startDate || !endDate) {
       return res.status(400).json({ error: 'Required parameters missing' });
     }
 
-    // Validate date formats
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate as string) || 
         !/^\d{4}-\d{2}-\d{2}$/.test(endDate as string)) {
       return res.status(400).json({ error: 'Invalid date format. Use yyyy-mm-dd' });
     }
 
-    const { data } = await axios.get(
-      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
-      {
-        params: {
-          start_date: startDate,
-          end_date: endDate,
-          meetingEventId: scheduleId,  // Use scheduleId directly
-          length: 1000
-        },
-        headers: { 
-          Authorization: `Token ${token}` 
-        }
-      }
-    );
-
-
-    const userRecords = data.results.filter((r: any) => 
-      r.memberId?.phone === phone
-    );
-
-    if (userRecords.length === 0) {
-      return res.status(404).json({ error: 'No attendance records found' });
-    }
-
-    const scheduleResponse = await axios.get(
-      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/${scheduleId}`,
-      {
-        headers: { 
-          Authorization: `Token ${token}` 
-        }
-      }
-    );
-
-    const scheduleDetails = scheduleResponse.data;
-
-    let clockIns = 0;
-    let clockOuts = 0;
-    let lateDays = 0;
-    let absentDays = 0;
-    let totalWorkHours = 0;
-    let overtimeDays = 0;
-    let totalOvertime = 0;
-
-    userRecords.forEach((record: any) => {
-      if (record.inTime) {
-        clockIns++;
-        
-        const clockInTime = new Date(record.inTime);
-        const scheduleStart = new Date(`${record.date.split('T')[0]}T${scheduleDetails.start_time}`);
-        
-        if (clockInTime > scheduleStart) {
-          lateDays++;
-        }
-        
-        if (record.outTime) {
-          clockOuts++;
-          const clockOutTime = new Date(record.outTime);
-          const workHours = (clockOutTime.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
-          totalWorkHours += workHours;
-          
-          const scheduleEnd = new Date(`${record.date.split('T')[0]}T${scheduleDetails.end_time}`);
-          if (clockOutTime > scheduleEnd) {
-            overtimeDays++;
-            totalOvertime += (clockOutTime.getTime() - scheduleEnd.getTime()) / (1000 * 60 * 60);
+    if (isAdmin === 'true') {
+      const { data } = await axios.get(
+        `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
+        {
+          params: {
+            start_date: startDate,
+            end_date: endDate,
+            meetingEventId: scheduleId,
+            length: 1000
+          },
+          headers: { 
+            Authorization: `Token ${token}` 
           }
         }
-      } else {
-        absentDays++;
-      }
-    });
+      );
 
-    return res.json({
-      firstName: userRecords[0].memberId.firstname,
-      clockIns,
-      clockOuts,
-      lateDays,
-      absentDays,
-      totalWorkHours: Math.round(totalWorkHours),
-      overtimeDays,
-      totalOvertime: Math.round(totalOvertime),
-      scheduleName: scheduleDetails.name
-    });
+      const totalRecords = data.results.length;
+      const presentRecords = data.results.filter((r: any) => r.inTime).length;
+      const lateRecords = data.results.filter((r: any) => 
+        r.inTime && r.meetingEventId.latenessTime && 
+        new Date(r.inTime) > new Date(r.meetingEventId.latenessTime)
+      ).length;
+
+      const scheduleResponse = await axios.get(
+        `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/${scheduleId}`,
+        {
+          headers: { 
+            Authorization: `Token ${token}` 
+          }
+        }
+      );
+
+      return res.json({
+        firstName: "Admin",
+        clockIns: presentRecords,
+        clockOuts: data.results.filter((r: any) => r.outTime).length,
+        lateDays: lateRecords,
+        absentDays: totalRecords - presentRecords,
+        totalWorkHours: 0,
+        overtimeDays: 0,
+        totalOvertime: 0,
+        scheduleName: scheduleResponse.data.name
+      });
+    } else {
+      const { data } = await axios.get(
+        `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
+        {
+          params: {
+            start_date: startDate,
+            end_date: endDate,
+            meetingEventId: scheduleId,
+            length: 1000
+          },
+          headers: { 
+            Authorization: `Token ${token}` 
+          }
+        }
+      );
+
+      const userRecords = data.results.filter((r: any) => 
+        r.memberId?.phone === phone
+      );
+
+      if (userRecords.length === 0) {
+        return res.status(404).json({ error: 'No attendance records found for this user' });
+      }
+
+      const scheduleResponse = await axios.get(
+        `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/${scheduleId}`,
+        {
+          headers: { 
+            Authorization: `Token ${token}` 
+          }
+        }
+      );
+
+      const scheduleDetails = scheduleResponse.data;
+
+      let clockIns = 0;
+      let clockOuts = 0;
+      let lateDays = 0;
+      let absentDays = 0;
+      let totalWorkHours = 0;
+      let overtimeDays = 0;
+      let totalOvertime = 0;
+
+      userRecords.forEach((record: any) => {
+        if (record.inTime) {
+          clockIns++;
+          
+          const clockInTime = new Date(record.inTime);
+          const scheduleStart = new Date(`${record.date.split('T')[0]}T${scheduleDetails.start_time}`);
+          
+          if (clockInTime > scheduleStart) {
+            lateDays++;
+          }
+          
+          if (record.outTime) {
+            clockOuts++;
+            const clockOutTime = new Date(record.outTime);
+            const workHours = (clockOutTime.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
+            totalWorkHours += workHours;
+            
+            const scheduleEnd = new Date(`${record.date.split('T')[0]}T${scheduleDetails.end_time}`);
+            if (clockOutTime > scheduleEnd) {
+              overtimeDays++;
+              totalOvertime += (clockOutTime.getTime() - scheduleEnd.getTime()) / (1000 * 60 * 60);
+            }
+          }
+        } else {
+          absentDays++;
+        }
+      });
+
+      return res.json({
+        firstName: userRecords[0].memberId.firstname,
+        clockIns,
+        clockOuts,
+        lateDays,
+        absentDays,
+        totalWorkHours: Math.round(totalWorkHours),
+        overtimeDays,
+        totalOvertime: Math.round(totalOvertime),
+        scheduleName: scheduleDetails.name
+      });
+    }
   } catch (error) {
     const err = error as AxiosError;
     console.error('Failed to fetch attendance stats:', err);
@@ -369,7 +449,7 @@ app.post('/api/sms/send', async (req: Request, res: Response) => {
     recipient.phone = to;
     recipient.frequency = frequency;
     recipient.lastSent = new Date();
-    recipient.messageType = 'Attendance Summary';
+    recipient.messageType = req.body.isAdmin ? 'Admin Summary' : 'User Summary';
     recipient.scheduleId = scheduleId;
     await recipient.save();
     
