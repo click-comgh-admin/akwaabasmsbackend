@@ -8,6 +8,13 @@ import * as path from "path";
 
 dotenv.config();
 
+console.log("▶️ TypeORM migrations will run against:", {
+  host:   process.env.DB_HOST,
+  port:   process.env.DB_PORT,
+  user:   process.env.DB_USER,
+  db:     process.env.DB_NAME,
+});
+
 export const AppDataSource = new DataSource({
   type: "postgres",
   host: process.env.DB_HOST,

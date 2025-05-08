@@ -470,6 +470,12 @@ const RETRY_DELAY = 5000;
 const initializeDatabase = async (attempt = 1): Promise<void> => {
   try {
     console.log(`Connecting to database (attempt ${attempt}/${MAX_RETRIES})...`);
+    console.log("🔍 Connecting to DB:", {
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      database: process.env.DB_NAME,
+      user:   process.env.DB_USER,
+    });
     await AppDataSource.initialize();
     console.log("Database connected successfully");
 
