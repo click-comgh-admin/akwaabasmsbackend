@@ -246,7 +246,7 @@ app.get('/api/attendance/stats', async (req: Request, res: Response) => {
     }
 
     const scheduleResponse = await axios.get(
-      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/details/${scheduleId}`,
+      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/${scheduleId}`,
       {
         headers: { 
           Authorization: `Token ${token}` 
