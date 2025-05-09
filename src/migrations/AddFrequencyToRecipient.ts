@@ -1,4 +1,3 @@
-// src/migrations/AddFrequencyToRecipient.ts
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 export class AddFrequencyToRecipient1690000000000 implements MigrationInterface {
