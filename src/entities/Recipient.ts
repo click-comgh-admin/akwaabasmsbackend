@@ -1,22 +1,42 @@
-import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from "typeorm";
+import { BaseEntity, Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn } from "typeorm";
+import { Schedule } from "./Schedule";
 
 @Entity()
 export class Recipient extends BaseEntity { 
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column()
+  @Column({ length: 20 })
   phone!: string;
 
   @Column()
   scheduleId!: number;
 
-  @Column()
-  frequency!: string; // 'Daily', 'Weekly', 'Monthly', 'Quarterly'
+  @ManyToOne(() => Schedule, schedule => schedule.recipients, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'scheduleId' })
+  schedule!: Schedule;
 
-  @Column({ type: 'timestamp' })
-  lastSent!: Date;
+  @Column({
+    type: 'enum',
+    enum: ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'],
+    default: 'Monthly'
+  })
+  frequency!: string;
 
-  @Column()
+// src/entities/Recipient.ts
+@Column({ type: 'timestamp', nullable: true })
+lastSent?: Date;  // Changed from Date | null to optional Date
+
+  @Column({
+    type: 'enum',
+    enum: ['Admin Summary', 'User Summary'],
+    default: 'User Summary'
+  })
   messageType!: string;
+
+  @Column({ length: 50 })
+  clientCode!: string;
+
+  @CreateDateColumn()
+  createdAt!: Date;
 }

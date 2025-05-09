@@ -54,37 +54,41 @@ export class ScheduleService {
   async updateLastSent(scheduleId: number) {
     const schedule = await Schedule.findOneBy({ id: scheduleId });
     if (!schedule) return;
-
+  
     schedule.lastSent = new Date();
-    schedule.nextSend = this.calculateNextSend(schedule.frequency, schedule.startTime);
+    schedule.nextSend = this.calculateNextSend(
+      schedule.frequency, 
+      schedule.startTime, 
+      schedule.lastSent
+    );
     return schedule.save();
   }
 
-  private calculateNextSend(frequency: string, time: string): Date {
-    const [hours, minutes] = time.split(':').map(Number);
-    const next = new Date();
+private calculateNextSend(frequency: string, time: string, lastSent?: Date): Date {
+  const [hours, minutes] = time.split(':').map(Number);
+  const next = lastSent ? new Date(lastSent) : new Date();
 
-    switch (frequency) {
-      case 'Daily':
-        next.setDate(next.getDate() + 1);
-        break;
-      case 'Weekly':
-        next.setDate(next.getDate() + 7);
-        break;
-      case 'Monthly':
-        next.setMonth(next.getMonth() + 1);
-        break;
-      case 'Quarterly':
-        next.setMonth(next.getMonth() + 3);
-        break;
-      case 'Annually':
-        next.setFullYear(next.getFullYear() + 1);
-        break;
-    }
-
-    next.setHours(hours, minutes, 0, 0);
-    return next;
+  switch (frequency) {
+    case 'Daily':
+      next.setDate(next.getDate() + 1);
+      break;
+    case 'Weekly':
+      next.setDate(next.getDate() + 7);
+      break;
+    case 'Monthly':
+      next.setMonth(next.getMonth() + 1);
+      break;
+    case 'Quarterly':
+      next.setMonth(next.getMonth() + 3);
+      break;
+    case 'Annually':
+      next.setFullYear(next.getFullYear() + 1);
+      break;
   }
+
+  next.setHours(hours, minutes, 0, 0);
+  return next;
+}
 
   async getAttendanceSummary(phone: string, frequency: string, meetingEventId: number, lastSent?: Date): Promise<AttendanceData> {
     const { startDate, endDate } = getDateRange(frequency, lastSent);

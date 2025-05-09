@@ -8,42 +8,45 @@ export class AttendanceService {
     private apiToken: string
   ) {}
 
-  async getAttendanceSummary(phone: string, frequency: string, meetingEventId: number, lastSent?: Date) {
-    const { startDate, endDate } = getDateRange(frequency, lastSent);
-    
-    try {
-      const response = await axios.get(`${this.apiUrl}/attendance/meeting-event/attendance`, {
-        params: {
-          filter_date: startDate,
-          meetingEventId,
-          length: 700
-        },
-        headers: {
-          Authorization: `Token ${this.apiToken}`
-        }
-      });
+// In attendance.service.ts, update getAttendanceSummary:
+async getAttendanceSummary(phone: string, frequency: string, meetingEventId: number, lastSent?: Date) {
+  const { startDate, endDate } = getDateRange(frequency, lastSent);
+  
+  try {
+    // First get schedule details
+    const scheduleResponse = await axios.get(`${this.apiUrl}/attendance/meeting-event/schedule/${meetingEventId}`, {
+      headers: { Authorization: `Token ${this.apiToken}` }
+    });
 
-      const userRecord = response.data.results.find((r: any) => 
-        r.memberId.phone === phone
-      );
+    // Then get attendance data
+    const attendanceResponse = await axios.get(`${this.apiUrl}/attendance/meeting-event/attendance`, {
+      params: { filter_date: startDate, meetingEventId, length: 700 },
+      headers: { Authorization: `Token ${this.apiToken}` }
+    });
 
-      if (!userRecord) {
-        throw new Error(`No attendance record found for phone: ${phone}`);
-      }
+    const userRecord = attendanceResponse.data.results.find((r: any) => 
+      r.memberId.phone === phone
+    );
 
-      return {
-        name: `${userRecord.memberId.firstname} ${userRecord.memberId.surname}`,
-        clockIns: userRecord.inTime ? 1 : 0,
-        lateDays: this.calculateLateDays(userRecord),
-        absentDays: this.calculateAbsentDays(userRecord),
-        totalHours: this.calculateTotalHours(userRecord),
-        month: new Date(startDate).toLocaleString('default', { month: 'long' })
-      };
-    } catch (error) {
-      console.error('Error fetching attendance:', error);
-      throw error;
+    if (!userRecord) {
+      throw new Error(`No attendance record found for phone: ${phone}`);
     }
+
+    return {
+      firstName: userRecord.memberId.firstname,
+      scheduleName: scheduleResponse.data.name,
+      clockIns: userRecord.inTime ? 1 : 0,
+      lateDays: this.calculateLateDays(userRecord),
+      absentDays: this.calculateAbsentDays(userRecord),
+      totalHours: this.calculateTotalHours(userRecord),
+      month: new Date(startDate).toLocaleString('default', { month: 'long' }),
+      year: new Date(startDate).getFullYear().toString()
+    };
+  } catch (error) {
+    console.error('Error fetching attendance:', error);
+    throw error;
   }
+}
 
   private calculateLateDays(record: any): number {
     return record.inTime && record.meetingEventId.latenessTime && 

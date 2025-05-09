@@ -483,20 +483,70 @@ app.get("/api/sms/logs", async (req: Request, res: Response) => {
 
 app.get("/api/recipients/list", async (req: Request, res: Response) => {
   try {
-    const recipients = await Recipient.find();
-    return res.json(recipients);
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Authorization token required' 
+      });
+    }
+
+    const tokenData = tokenStore.get(token);
+    if (!tokenData) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Invalid or expired token' 
+      });
+    }
+
+    const { phone, scheduleId, frequency, messageType } = req.query;
+    const queryBuilder = Recipient.createQueryBuilder('recipient')
+      .leftJoinAndSelect('recipient.schedule', 'schedule')
+      .where('recipient.clientCode = :clientCode', { clientCode: tokenData.clientCode });
+
+    if (phone) {
+      queryBuilder.andWhere('recipient.phone = :phone', { phone });
+    }
+
+    if (scheduleId) {
+      queryBuilder.andWhere('recipient.scheduleId = :scheduleId', { scheduleId: Number(scheduleId) });
+    }
+
+    if (frequency && frequency !== 'All') {
+      queryBuilder.andWhere('recipient.frequency = :frequency', { frequency });
+    }
+
+    if (messageType) {
+      queryBuilder.andWhere('recipient.messageType = :messageType', { messageType });
+    }
+
+    const recipients = await queryBuilder
+      .orderBy('recipient.lastSent', 'DESC')
+      .getMany();
+
+    return res.json({
+      success: true,
+      data: recipients.map(r => ({
+        id: r.id,
+        phone: r.phone,
+        frequency: r.frequency,
+        lastSent: r.lastSent,
+        messageType: r.messageType,
+        scheduleId: r.scheduleId,
+        scheduleName: r.schedule?.senderName || 'N/A',
+        createdAt: r.createdAt
+      })),
+      count: recipients.length,
+      clientCode: tokenData.clientCode,
+      orgName: tokenData.orgName
+    });
+
   } catch (error) {
     const err = error as Error;
     console.error('Failed to fetch recipients:', err);
     
-    if (err.message.includes('column') && err.message.includes('does not exist')) {
-      return res.status(500).json({ 
-        error: "Database schema mismatch - please run migrations",
-        details: process.env.NODE_ENV === 'development' ? err.message : undefined
-      });
-    }
-    
     return res.status(500).json({ 
+      success: false,
       error: "Failed to fetch recipients", 
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -508,7 +558,8 @@ const scheduleBackgroundJobs = (
   scheduleService: ScheduleService,
   attendanceService: AttendanceService
 ): void => {
-  cron.scheduleJob("*/5 * * * *", async () => {
+  // Run every minute for testing, change to "0 8 * * *" for daily at 8am
+  cron.scheduleJob("* * * * *", async () => {
     try {
       console.log("Running scheduled SMS jobs...");
       const pending = await scheduleService.getPendingSchedules();
@@ -521,6 +572,9 @@ const scheduleBackgroundJobs = (
           
           for (const recipient of recipients) {
             try {
+              const isAdmin = recipient.messageType === 'Admin Summary';
+              const senderName = isAdmin ? 'AKWAABA' : schedule.senderName;
+              
               const data = await attendanceService.getAttendanceSummary(
                 recipient.phone,
                 schedule.frequency,
@@ -530,7 +584,7 @@ const scheduleBackgroundJobs = (
               
               const message = scheduleService.formatMessage(data, schedule.template);
               await smsService.sendSMS({
-                from: schedule.senderName,
+                from: senderName,
                 to: recipient.phone,
                 content: message,
               });
