@@ -9,7 +9,7 @@
     "migration:generate": "typeorm-ts-node-commonjs migration:generate src/migrations/Migration -d src/data-source.ts",
     "migration:run": "cross-env RUN_MIGRATIONS=true ts-node src/app.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
-    "migration:create": "typeorm-ts-node-commonjs migration:create src/migrations/AddFrequencyToRecipient"
+    "migration:create": "typeorm-ts-node-commonjs migration:create"
   },
   "keywords": [],
   "author": "",
