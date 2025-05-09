@@ -29,7 +29,7 @@ const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 });
 const tokenStore = new Map<string, TokenData>();
 
 app.use(cors({
-  origin: ['https://report-akwaaba.vercel.app', 'http://localhost:3000', 'https://alert.akwaabahr.com'],
+  origin: ['https://app.akwaabahr.com', 'http://localhost:3000', 'https://alert.akwaabahr.com'],
   credentials: true
 }));
 app.use(express.json({ limit: '60mb' }));
