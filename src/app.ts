@@ -29,7 +29,7 @@ const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 });
 const tokenStore = new Map<string, TokenData>();
 
 app.use(cors({
-  origin: ['https://app.akwaabahr.com', 'http://localhost:3000', 'https://alert.akwaabahr.com'],
+  origin: ['https://app.akwaabahr.com', 'http://localhost:3000', 'https://alert.akwaabahr.com, https://timmy.akwaabahr.com'],
   credentials: true
 }));
 app.use(express.json({ limit: '60mb' }));
@@ -59,6 +59,65 @@ app.get('/health', (req: Request, res: Response) => {
     database: AppDataSource.isInitialized ? 'connected' : 'disconnected',
     timestamp: new Date().toISOString()
   });
+});
+
+// Add this endpoint to your app.ts
+app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Token is required' 
+      });
+    }
+
+    // Forward the token to Akwaaba's authentication endpoint
+    const response = await axios.post(
+      'https://timmy.akwaabahr.com/api/auth/cross-login',
+      { token },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (response.data.success) {
+      const { authToken, user, organizationName } = response.data.data;
+      
+      // Store the token in memory (you might want to use a more secure storage)
+      tokenStore.set(authToken, {
+        clientCode: user.accountId.toString(),
+        email: user.email,
+        orgName: organizationName
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          authToken,
+          user,
+          organizationName
+        }
+      });
+    } else {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired token'
+      });
+    }
+  } catch (error) {
+    const err = error as AxiosError;
+    console.error('Failed to verify token:', err);
+    
+    return res.status(500).json({ 
+      success: false,
+      error: "Failed to verify token",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
 });
 
 app.post('/api/auth/store-token', (req: Request, res: Response) => {

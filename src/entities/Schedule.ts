@@ -19,7 +19,6 @@ export class Schedule extends BaseEntity {
   @Column({ type: 'time' })
   startTime!: string;
 
-  // src/entities/Schedule.ts
 @Column({ type: 'timestamp', nullable: true })
 lastSent?: Date;  // Changed from Date | null to optional Date
 

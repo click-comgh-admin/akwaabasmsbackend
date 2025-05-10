@@ -23,7 +23,6 @@ export class Recipient extends BaseEntity {
   })
   frequency!: string;
 
-// src/entities/Recipient.ts
 @Column({ type: 'timestamp', nullable: true })
 lastSent?: Date;  // Changed from Date | null to optional Date
 
