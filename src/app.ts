@@ -69,6 +69,8 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
+  console.log('Received verify-token request');
+  
   // Set CORS headers
   res.header('Access-Control-Allow-Origin', 'https://alert.akwaabahr.com');
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -77,21 +79,23 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
 
   // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS preflight');
     return res.status(200).end();
   }
 
   try {
     const { token } = req.body;
+    console.log('Token received:', token ? 'exists' : 'missing');
     
     if (!token) {
-      console.error('Token missing in request');
+      console.error('Token missing in request body');
       return res.status(400).json({ 
         success: false,
         error: 'Token is required' 
       });
     }
 
-    console.log('Verifying token with timmy.akwaabahr.com...');
+    console.log('Forwarding token to Timmy server...');
     const response = await axios.post(
       'https://timmy.akwaabahr.com/api/auth/cross-login',
       { token },
@@ -104,17 +108,21 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
       }
     );
 
-    console.log('Timmy response:', response.data);
+    console.log('Timmy server response:', {
+      status: response.status,
+      data: response.data
+    });
 
     if (response.data?.success) {
       const { authToken, user, organizationName } = response.data.data;
+      console.log('Authentication successful for:', user.email);
       
       // Set HTTP-only cookie
       res.cookie('authToken', authToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 86400 * 1000 // 1 day in milliseconds
+        sameSite: 'none',
+        maxAge: 86400 * 1000 // 1 day
       });
 
       return res.json({
@@ -139,10 +147,14 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
     console.error('Token verification error:', error);
     
     if (axios.isAxiosError(error)) {
+      console.error('Axios error details:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      });
       return res.status(error.response?.status || 500).json({
         success: false,
-        error: error.response?.data?.error || 'Authentication service error',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: error.response?.data?.error || 'Authentication service error'
       });
     }
     
