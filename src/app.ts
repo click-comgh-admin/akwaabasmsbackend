@@ -73,7 +73,7 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
   res.header('Access-Control-Allow-Origin', 'https://alert.akwaabahr.com');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
@@ -109,11 +109,22 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
     if (response.data?.success) {
       const { authToken, user, organizationName } = response.data.data;
       
+      // Set HTTP-only cookie
+      res.cookie('authToken', authToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 86400 * 1000 // 1 day in milliseconds
+      });
+
       return res.json({
         success: true,
         data: {
           authToken,
-          user,
+          user: {
+            accountId: user.accountId,
+            email: user.email
+          },
           organizationName
         }
       });
