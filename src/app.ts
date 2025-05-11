@@ -69,17 +69,29 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
+  // Set CORS headers
+  res.header('Access-Control-Allow-Origin', 'https://alert.akwaabahr.com');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
     const { token } = req.body;
     
     if (!token) {
+      console.error('Token missing in request');
       return res.status(400).json({ 
         success: false,
         error: 'Token is required' 
       });
     }
 
-    // Forward the token to Akwaaba's authentication endpoint
+    console.log('Verifying token with timmy.akwaabahr.com...');
     const response = await axios.post(
       'https://timmy.akwaabahr.com/api/auth/cross-login',
       { token },
@@ -87,23 +99,16 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
-        }
+        },
+        timeout: 10000
       }
     );
 
-    // Add debug logging
-    console.log('Response from timmy:', response.data);
+    console.log('Timmy response:', response.data);
 
-    if (response.data.success) {
+    if (response.data?.success) {
       const { authToken, user, organizationName } = response.data.data;
       
-      // Store the token in memory
-      tokenStore.set(authToken, {
-        clientCode: user.accountId.toString(),
-        email: user.email,
-        orgName: organizationName
-      });
-
       return res.json({
         success: true,
         data: {
@@ -113,23 +118,26 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
         }
       });
     } else {
+      console.error('Timmy verification failed:', response.data);
       return res.status(401).json({
         success: false,
-        error: 'Invalid or expired token'
+        error: response.data?.error || 'Invalid token'
       });
     }
   } catch (error) {
-    const err = error as AxiosError;
-    console.error('Failed to verify token:', {
-      message: err.message,
-      response: err.response?.data,
-      stack: err.stack
-    });
+    console.error('Token verification error:', error);
+    
+    if (axios.isAxiosError(error)) {
+      return res.status(error.response?.status || 500).json({
+        success: false,
+        error: error.response?.data?.error || 'Authentication service error',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
     
     return res.status(500).json({ 
       success: false,
-      error: "Failed to verify token",
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: "Internal server error"
     });
   }
 });
