@@ -29,8 +29,15 @@ const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 });
 const tokenStore = new Map<string, TokenData>();
 
 app.use(cors({
-  origin: ['https://app.akwaabahr.com', 'http://localhost:3000', 'https://alert.akwaabahr.com, https://timmy.akwaabahr.com'],
-  credentials: true
+  origin: [
+    'https://app.akwaabahr.com', 
+    'http://localhost:3000', 
+    'https://alert.akwaabahr.com',
+    'https://timmy.akwaabahr.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -61,7 +68,6 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// Add this endpoint to your app.ts
 app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
   try {
     const { token } = req.body;
@@ -79,15 +85,19 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
       { token },
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         }
       }
     );
 
+    // Add debug logging
+    console.log('Response from timmy:', response.data);
+
     if (response.data.success) {
       const { authToken, user, organizationName } = response.data.data;
       
-      // Store the token in memory (you might want to use a more secure storage)
+      // Store the token in memory
       tokenStore.set(authToken, {
         clientCode: user.accountId.toString(),
         email: user.email,
@@ -110,7 +120,11 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
     }
   } catch (error) {
     const err = error as AxiosError;
-    console.error('Failed to verify token:', err);
+    console.error('Failed to verify token:', {
+      message: err.message,
+      response: err.response?.data,
+      stack: err.stack
+    });
     
     return res.status(500).json({ 
       success: false,
