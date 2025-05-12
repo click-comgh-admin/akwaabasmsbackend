@@ -68,17 +68,18 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
+const allowedOrigins = ['https://alert.akwaabahr.com', 'https://app.akwaabahr.com'];
+
 app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
-  console.log('Received verify-token request');
+  const origin = req.headers.origin;
   
-  // Set CORS headers
-  res.header('Access-Control-Allow-Origin', 'https://alert.akwaabahr.com');
-  res.header('Access-Control-Allow-Origin', 'https://app.akwaabahr.com');
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -102,7 +103,7 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        timeout: 120000 // Increased to 120 seconds (120,000ms)
+        timeout: 120000
       }
     );
 
