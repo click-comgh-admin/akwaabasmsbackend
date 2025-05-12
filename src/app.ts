@@ -97,7 +97,7 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
 
     console.log('Forwarding token to Timmy server...');
     const response = await axios.post(
-      'https://timmy.akwaabahr.com/api/auth/cross-login',
+      'https://timmy.akwaabahr.com/api/cross-auth-auth/receiver', // UPDATED ENDPOINT
       { token },
       {
         headers: {
@@ -113,25 +113,27 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
       data: response.data
     });
 
-    if (response.data?.success) {
-      const { authToken, user, organizationName } = response.data.data;
-      console.log('Authentication successful for:', user.email);
+    if (response.status === 200 && response.data.rawToken) {
+      const { rawToken, organizationName, ...userData } = response.data;
+      console.log('Authentication successful for:', userData.email);
       
-      // Set HTTP-only cookie
-      res.cookie('authToken', authToken, {
+      // Set HTTP-only cookie with the rawToken
+      res.cookie('authToken', rawToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'none',
-        maxAge: 86400 * 1000 // 1 day
+        maxAge: 86400 * 1000, // 1 day
+        domain: '.akwaabahr.com' // Allow subdomain access
       });
 
       return res.json({
         success: true,
         data: {
-          authToken,
+          authToken: rawToken, // The token for db-api-v2
           user: {
-            accountId: user.accountId,
-            email: user.email
+            accountId: userData.accountId,
+            email: userData.email,
+            phone: userData.phone
           },
           organizationName
         }
@@ -140,7 +142,7 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
       console.error('Timmy verification failed:', response.data);
       return res.status(401).json({
         success: false,
-        error: response.data?.error || 'Invalid token'
+        error: response.data?.error || 'Invalid token response'
       });
     }
   } catch (error) {
