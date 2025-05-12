@@ -73,6 +73,7 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
   
   // Set CORS headers
   res.header('Access-Control-Allow-Origin', 'https://alert.akwaabahr.com');
+  res.header('Access-Control-Allow-Origin', 'https://app.akwaabahr.com');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
