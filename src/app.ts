@@ -79,45 +79,36 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
 
   // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS preflight');
     return res.status(200).end();
   }
 
   try {
     const { token } = req.body;
-    console.log('Token received:', token ? 'exists' : 'missing');
     
     if (!token) {
-      console.error('Token missing in request body');
       return res.status(400).json({ 
         success: false,
         error: 'Token is required' 
       });
     }
 
-    console.log('Forwarding token to Timmy server...');
+    console.log('Forwarding token to Timmy server with 120s timeout...');
     const response = await axios.post(
-      'https://timmy.akwaabahr.com/api/cross-auth-auth/receiver', // UPDATED ENDPOINT
+      'https://timmy.akwaabahr.com/api/cross-auth-auth/receiver',
       { token },
       {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        timeout: 10000
+        timeout: 120000 // Increased to 120 seconds (120,000ms)
       }
     );
 
-    console.log('Timmy server response:', {
-      status: response.status,
-      data: response.data
-    });
-
     if (response.status === 200 && response.data.rawToken) {
       const { rawToken, organizationName, ...userData } = response.data;
-      console.log('Authentication successful for:', userData.email);
       
-      // Set HTTP-only cookie with the rawToken
+      // Set HTTP-only cookie
       res.cookie('authToken', rawToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -129,7 +120,7 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
       return res.json({
         success: true,
         data: {
-          authToken: rawToken, // The token for db-api-v2
+          authToken: rawToken,
           user: {
             accountId: userData.accountId,
             email: userData.email,
@@ -139,7 +130,6 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
         }
       });
     } else {
-      console.error('Timmy verification failed:', response.data);
       return res.status(401).json({
         success: false,
         error: response.data?.error || 'Invalid token response'
@@ -149,11 +139,14 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
     console.error('Token verification error:', error);
     
     if (axios.isAxiosError(error)) {
-      console.error('Axios error details:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
-      });
+      // Handle timeout specifically
+      if (error.code === 'ECONNABORTED') {
+        return res.status(504).json({
+          success: false,
+          error: 'Authentication service timeout'
+        });
+      }
+      
       return res.status(error.response?.status || 500).json({
         success: false,
         error: error.response?.data?.error || 'Authentication service error'
