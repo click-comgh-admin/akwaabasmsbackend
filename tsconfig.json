@@ -11,7 +11,7 @@
     "strictPropertyInitialization": false,
     "types": ["node"],
     "rootDir": "src",
-    "outDir": "lib",
+    "outDir": "dist",
     "sourceMap": true,
     "skipLibCheck": true
   },

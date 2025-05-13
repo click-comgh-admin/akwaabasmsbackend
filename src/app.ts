@@ -71,8 +71,10 @@ app.get('/health', (req: Request, res: Response) => {
 const allowedOrigins = ['https://alert.akwaabahr.com', 'https://app.akwaabahr.com'];
 
 app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
+  const { token } = req.body;
   const origin = req.headers.origin;
-  
+
+  const allowedOrigins = ['https://alert.akwaabahr.com', 'https://app.akwaabahr.com'];
   if (origin && allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   }
@@ -81,86 +83,105 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
+    console.info("[CORS] Preflight request allowed.");
     return res.status(200).end();
   }
 
-  try {
-    const { token } = req.body;
-    
-    if (!token) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Token is required' 
-      });
-    }
+  if (!token) {
+    console.warn("[Verify Token] No token provided in request body.");
+    return res.status(400).json({ success: false, error: 'Token is required' });
+  }
 
-    console.log('Forwarding token to Timmy server with 120s timeout...');
+  console.info(`[Verify Token] Initiating verification for token: ${token.slice(0, 12)}...`);
+
+  try {
+    const timmyUrl = 'https://timmy.akwaabahr.com/api/cross-auth-auth/receiver';
+    console.info(`[Verify Token] Forwarding token to Timmy server: ${timmyUrl}`);
+
     const response = await axios.post(
-      'https://timmy.akwaabahr.com/api/cross-auth-auth/receiver',
+      timmyUrl,
       { token },
       {
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
         },
-        timeout: 120000
+        timeout: 120000,
       }
     );
 
-    if (response.status === 200 && response.data.rawToken) {
-      const { rawToken, organizationName, ...userData } = response.data;
-      
-      // Set HTTP-only cookie
+    // Log full response structure
+    console.log("[Verify Token] Response from Timmy:");
+    console.log("  → Status:", response.status);
+    console.log("  → Headers:", JSON.stringify(response.headers, null, 2));
+    console.log("  → Body:", JSON.stringify(response.data, null, 2));
+
+    if (response.status === 200 && response.data?.data?.rawToken) {
+      const { rawToken, organizationName, user } = response.data.data;
+    
+      console.info("[Verify Token] Token verified. Setting HTTP-only cookie...");
+    
       res.cookie('authToken', rawToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'none',
-        maxAge: 86400 * 1000, // 1 day
-        domain: '.akwaabahr.com' // Allow subdomain access
+        maxAge: 86400 * 1000,
+        domain: '.akwaabahr.com',
       });
-
+    
+      const userSummary = {
+        accountId: user.accountId,
+        email: user.email,
+        phone: user.phone,
+      };
+    
+      console.log("[Verify Token] Cookie set. Responding with verified user:");
+      console.log("  → User:", JSON.stringify(userSummary, null, 2));
+    
       return res.json({
         success: true,
         data: {
           authToken: rawToken,
-          user: {
-            accountId: userData.accountId,
-            email: userData.email,
-            phone: userData.phone
-          },
-          organizationName
-        }
+          user: userSummary,
+          organizationName,
+        },
       });
     } else {
+      console.warn("[Verify Token] Verification failed. Missing rawToken or invalid response.");
+      console.warn("  → Full Response:", JSON.stringify(response.data, null, 2));
+    
       return res.status(401).json({
         success: false,
-        error: response.data?.error || 'Invalid token response'
+        error: response.data?.error || 'Invalid token response',
+        debug: process.env.NODE_ENV !== 'production' ? response.data : undefined,
       });
     }
+    
   } catch (error) {
-    console.error('Token verification error:', error);
-    
+    console.error("[Verify Token] Error occurred during verification:", error);
+
     if (axios.isAxiosError(error)) {
-      // Handle timeout specifically
       if (error.code === 'ECONNABORTED') {
-        return res.status(504).json({
-          success: false,
-          error: 'Authentication service timeout'
-        });
+        console.error("[Verify Token] Request to Timmy server timed out after 120s.");
+        return res.status(504).json({ success: false, error: 'Authentication service timeout' });
       }
-      
-      return res.status(error.response?.status || 500).json({
-        success: false,
-        error: error.response?.data?.error || 'Authentication service error'
-      });
+
+      const status = error.response?.status || 500;
+      const errMessage = error.response?.data?.error || error.message || 'Unknown error';
+
+      console.error(`[Verify Token] Axios error response:`);
+      console.error("  → Status:", status);
+      console.error("  → Message:", errMessage);
+      console.error("  → Response:", JSON.stringify(error.response?.data || {}, null, 2));
+
+      return res.status(status).json({ success: false, error: errMessage });
     }
-    
-    return res.status(500).json({ 
-      success: false,
-      error: "Internal server error"
-    });
+
+    console.error("[Verify Token] Non-Axios error:", error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
+
 
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
   const { clientCode, email, token, orgName } = req.body;
