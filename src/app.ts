@@ -17,6 +17,8 @@ import { Recipient } from "./entities/Recipient";
 import { HubtelSMS } from "./services/sms.service";
 import { ScheduleService } from "./services/schedule.service";
 import { AttendanceService } from "./services/attendance.service";
+import { getSessionFromToken } from "./utils/getSessionFromToken";
+import cookieParser from 'cookie-parser';
 
 interface TokenData {
   clientCode: string;
@@ -25,6 +27,7 @@ interface TokenData {
 }
 
 const app: Express = express();
+app.use(cookieParser());
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 });
 const tokenStore = new Map<string, TokenData>();
 
@@ -181,6 +184,70 @@ app.post('/api/auth/verify-token', async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
+
+app.get('/api/auth/me', async (req: Request, res: Response) => {
+  try {
+    const token = req.cookies?.authToken;
+
+    if (!token) {
+      console.warn('[Auth Me] No auth token found in cookies.');
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const session = await getSessionFromToken(token);
+
+    if (!session) {
+      console.warn('[Auth Me] Token verification failed or session not found.');
+      return res.status(401).json({ success: false, error: 'Invalid or expired session' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user: {
+        email: session.email,
+        clientCode: session.clientCode,
+        orgName: session.organizationName
+      }
+    });
+  } catch (error) {
+    console.error('[Auth Me] Unexpected error:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  try {
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none' as const,
+      domain: '.akwaabahr.com',
+      path: '/',
+    };
+
+    // Clear the authToken cookie
+    res.clearCookie('authToken', cookieOptions);
+
+    // Optional: clear additional session-related cookies if used
+    res.clearCookie('csrfToken', cookieOptions);
+    res.clearCookie('client_phone', cookieOptions);
+
+    console.log('[Logout] Session cookies cleared successfully.');
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+  } catch (error) {
+    console.error('[Logout] Error clearing cookies:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to log out',
+    });
+  }
+});
+
+
 
 
 app.post('/api/auth/store-token', (req: Request, res: Response) => {
