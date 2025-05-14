@@ -1,6 +1,6 @@
 // scripts/checkSchema.ts
 import "reflect-metadata";
-import { AppDataSource } from "../data-source";
+import { AppDataSource } from "../config/data-source";
 
 async function main() {
   await AppDataSource.initialize();

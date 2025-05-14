@@ -4,19 +4,19 @@ import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 @Entity()
 export class SMSLog extends BaseEntity {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @Column()
-  recipient: string;
+  recipient!: string;
 
   @Column('text')
-  message: string;
+  message!: string;
 
   @Column()
-  status: string;
+  status!: string;
 
   @Column()
-  sentAt: Date;
+  sentAt!: Date;
 
   @Column({ type: 'json', nullable: true })
   response: any;
