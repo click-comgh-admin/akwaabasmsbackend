@@ -23,7 +23,7 @@ export async function forwardRequest(req: Request, res: Response) {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 
-  const path = req.params[0]; // dynamic wildcard path after /forward/*
+  const path = req.params.path;
   const url = `${targetHost}/${path}`;
 
   try {

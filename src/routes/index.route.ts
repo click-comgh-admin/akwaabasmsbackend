@@ -111,6 +111,7 @@ router.get("/sms/logs", getSMSLogs);
 //          Authorization: Token {rawToken}
 // @example curl --cookie "authToken=your_signed_token" https://sms-api.akwaabahr.com/api/forward/attendance/meeting-event/schedule/date/2025-11-19
 
-router.all("/forward/*", forwardRequest);
+router.all("/forward/:path(*)", forwardRequest);
+
 
 export default router;
