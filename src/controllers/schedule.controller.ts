@@ -14,7 +14,7 @@ export async function getAvailableSchedules(req: Request, res: Response) {
   try {
     const today = format(new Date(), "yyyy-MM-dd");
     const { data } = await axios.get(
-      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
+      `https://sms-api.akwaabahr.com/api/forward/attendance/meeting-event/schedule/date/${today}?datatable_plugin`,
       {
         headers: { Authorization: `Token ${rawToken}` },
         timeout: 10000,
@@ -82,7 +82,7 @@ export async function getUsersPerSchedule(req: Request, res: Response) {
     const today = format(new Date(), "yyyy-MM-dd");
 
     const { data } = await axios.get(
-      `${process.env.ATTENDANCE_API_URL}/attendance/meeting-event/attendance`,
+      `https://sms-api.akwaabahr.com/api/forward/attendance/meeting-event/attendance`,
       {
         params: {
           filter_date: today,
