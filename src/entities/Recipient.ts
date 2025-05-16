@@ -33,12 +33,13 @@ lastSent?: Date;  // Changed from Date | null to optional Date
   })
   messageType!: string;
 
-    @Column({ 
-    type: 'varchar',
-    length: 50,
-    nullable: false // Required but no default
-  })
-  clientCode!: string;
+@Column({ 
+  type: 'varchar',
+  length: 50,
+  nullable: false,
+  name: 'clientcode' 
+})
+clientCode!: string;
 
   @CreateDateColumn()
   createdAt!: Date;
