@@ -9,29 +9,33 @@ export class Recipient extends BaseEntity {
   @Column({ length: 20 })
   phone!: string;
 
-  @Column({ name: 'scheduleid' })
+  @Column({ name: 'scheduleid' }) // Match exact database column name
   scheduleId!: number;
 
   @ManyToOne(() => Schedule, schedule => schedule.recipients, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'scheduleid' })
+  @JoinColumn({ name: 'scheduleid' }) // Match exact database column name
   schedule!: Schedule;
 
   @Column({
     type: 'enum',
     enum: ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'],
     default: 'Monthly',
-    name: 'frequency'
+    name: 'frequency' // Match exact database column name
   })
   frequency!: string;
 
-  @Column({ type: 'timestamp', name: 'lastsent', nullable: true })
+  @Column({ 
+    type: 'timestamp', 
+    name: 'lastsent', // Match exact database column name
+    nullable: true 
+  })
   lastSent?: Date;
 
   @Column({
     type: 'enum',
     enum: ['Admin Summary', 'User Summary'],
     default: 'User Summary',
-    name: 'messagetype'
+    name: 'messagetype' // Match exact database column name
   })
   messageType!: string;
 
@@ -39,10 +43,10 @@ export class Recipient extends BaseEntity {
     type: 'varchar',
     length: 50,
     nullable: false,
-    name: 'clientcode'
+    name: 'clientcode' // Match exact database column name
   })
   clientCode!: string;
 
-  @CreateDateColumn({ name: 'createdat' })
+  @CreateDateColumn({ name: 'createdat' }) // Match exact database column name
   createdAt!: Date;
 }
