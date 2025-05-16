@@ -17,7 +17,7 @@ import { scheduleBackgroundJobs } from "./services/cron_job.service";
 // Constants
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
-const PORT = Number(process.env.PORT || 5000);
+const PORT = Number(5550);
 
 // Express App Setup
 const app = express();

@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import axios from "axios";
+import https from "https";
 import { verifyToken } from "../services/jwt.service";
 
 /**
  * Forwards any HTTP request to https://db-api-v2.akwaabasoftware.com
- * Preserves method, headers, query, and body. Requires a valid authToken cookie.
+ * Requires a valid authToken cookie and only includes the Authorization header.
  */
 export async function forwardRequest(req: Request, res: Response) {
   const targetHost = "https://db-api-v2.akwaabasoftware.com";
@@ -23,20 +24,29 @@ export async function forwardRequest(req: Request, res: Response) {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 
-  const path = req.params.path;
+  const path = req.params[0]; // router.all('/forward/*', forwardRequest)
   const url = `${targetHost}/${path}`;
+
+  // 👇 Only forward Authorization header
+  const headers = {
+    Authorization: `Token ${rawToken}`,
+    "Content-Type": req.headers["content-type"] || "application/json",
+  };
+
+  const httpsAgent = new https.Agent({
+    rejectUnauthorized: true,
+    checkServerIdentity: () => undefined, // ⚠️ Only use in dev to skip SAN errors
+  });
 
   try {
     const response = await axios({
       method: req.method as any,
       url,
-      headers: {
-        Authorization: `Token ${rawToken}`,
-        ...req.headers,
-      },
+      headers,
       params: req.query,
       data: req.body,
       timeout: 120_000,
+      httpsAgent,
     });
 
     return res.status(response.status).json(response.data);
@@ -55,3 +65,6 @@ export async function forwardRequest(req: Request, res: Response) {
     });
   }
 }
+
+
+// rsync -avz --exclude 'node_modules' --exclude 'src' --exclude '.git' ~/Documents/GitHub/akwaabasmsbackend/ root@144.126.202.27:/var/www/smsbackend
