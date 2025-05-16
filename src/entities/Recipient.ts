@@ -9,38 +9,40 @@ export class Recipient extends BaseEntity {
   @Column({ length: 20 })
   phone!: string;
 
-  @Column()
+  @Column({ name: 'scheduleid' })
   scheduleId!: number;
 
   @ManyToOne(() => Schedule, schedule => schedule.recipients, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'scheduleId' })
+  @JoinColumn({ name: 'scheduleid' })
   schedule!: Schedule;
 
   @Column({
     type: 'enum',
     enum: ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'],
-    default: 'Monthly'
+    default: 'Monthly',
+    name: 'frequency'
   })
   frequency!: string;
 
-@Column({ type: 'timestamp', nullable: true })
-lastSent?: Date;  // Changed from Date | null to optional Date
+  @Column({ type: 'timestamp', name: 'lastsent', nullable: true })
+  lastSent?: Date;
 
   @Column({
     type: 'enum',
     enum: ['Admin Summary', 'User Summary'],
-    default: 'User Summary'
+    default: 'User Summary',
+    name: 'messagetype'
   })
   messageType!: string;
 
-@Column({ 
-  type: 'varchar',
-  length: 50,
-  nullable: false,
-  name: 'clientcode' 
-})
-clientCode!: string;
+  @Column({ 
+    type: 'varchar',
+    length: 50,
+    nullable: false,
+    name: 'clientcode'
+  })
+  clientCode!: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'createdat' })
   createdAt!: Date;
 }
