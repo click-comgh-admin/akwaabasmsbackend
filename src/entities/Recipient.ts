@@ -9,11 +9,11 @@ export class Recipient extends BaseEntity {
   @Column({ length: 20 })
   phone!: string;
 
-  @Column({ name: 'scheduleid' }) // Match exact database column name
+  @Column({ name: 'scheduleid' }) 
   scheduleId!: number;
 
   @ManyToOne(() => Schedule, schedule => schedule.recipients, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'scheduleid' }) // Match exact database column name
+  @JoinColumn({ name: 'scheduleid' })
   schedule!: Schedule;
 
   @Column({
@@ -35,7 +35,7 @@ export class Recipient extends BaseEntity {
     type: 'enum',
     enum: ['Admin Summary', 'User Summary'],
     default: 'User Summary',
-    name: 'messagetype' // Match exact database column name
+    name: 'messagetype' 
   })
   messageType!: string;
 
@@ -43,10 +43,10 @@ export class Recipient extends BaseEntity {
     type: 'varchar',
     length: 50,
     nullable: false,
-    name: 'clientcode' // Match exact database column name
+    name: 'clientcode' 
   })
   clientCode!: string;
 
-  @CreateDateColumn({ name: 'createdat' }) // Match exact database column name
+  @CreateDateColumn({ name: 'createdat' }) 
   createdAt!: Date;
 }
