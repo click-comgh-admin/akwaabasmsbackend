@@ -30,23 +30,38 @@ export async function checkRecipient(req: Request, res: Response) {
   }
 }
 // In recipients.controller.ts, add better validation
+// In recipients.controller.ts
 export async function deleteRecipientByPhone(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
 
   const { phone, scheduleId } = req.query;
 
-  if (!phone || !scheduleId || isNaN(Number(scheduleId))) {
+  // Enhanced validation
+  if (!phone || typeof phone !== 'string' || !/^\+?\d{10,15}$/.test(phone)) {
     return res.status(400).json({
-      error: "Missing or invalid phone/scheduleId parameters"
+      error: "Invalid phone number format (10-15 digits, + optional)"
+    });
+  }
+
+  if (!scheduleId || isNaN(Number(scheduleId))) {
+    return res.status(400).json({
+      error: "Invalid scheduleId (must be a number)"
     });
   }
 
   try {
     const result = await Recipient.delete({
-      phone: phone.toString(),
+      phone: phone,
       scheduleId: Number(scheduleId)
     });
+    
+    if (result.affected === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "No recipient found with that phone and scheduleId"
+      });
+    }
     
     return res.json({
       success: true,
