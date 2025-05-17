@@ -21,7 +21,7 @@ export class SMSLog extends BaseEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   error?: string;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'sentAt', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   sentAt!: Date;
 
   @Column({ type: 'varchar', nullable: true })
