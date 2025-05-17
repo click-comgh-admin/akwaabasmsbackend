@@ -3,42 +3,54 @@ import axios from "axios";
 import https from "https";
 import { verifyToken } from "../services/jwt.service";
 
-/**
- * Forwards any HTTP request to https://db-api-v2.akwaabasoftware.com
- * Requires a valid authToken cookie and only includes the Authorization header.
- */
 export async function forwardRequest(req: Request, res: Response) {
   const targetHost = "https://db-api-v2.akwaabasoftware.com";
-
-  const token = req.cookies?.authToken;
-  if (!token) {
-    return res.status(401).json({ success: false, error: "Missing authToken cookie" });
-  }
-
   let rawToken: string;
-  try {
-    const session = verifyToken(token);
-    rawToken = session.rawToken;
-  } catch (err) {
-    console.error("[Forwarder] Invalid token:", err);
-    return res.status(401).json({ success: false, error: "Invalid or expired token" });
-  }
-
-  const path = req.params[0]; // router.all('/forward/*', forwardRequest)
-  const url = `${targetHost}/${path}`;
-
-  // 👇 Only forward Authorization header
-  const headers = {
-    Authorization: `Token ${rawToken}`,
-    "Content-Type": req.headers["content-type"] || "application/json",
-  };
-
-  const httpsAgent = new https.Agent({
-    rejectUnauthorized: true,
-    checkServerIdentity: () => undefined, // ⚠️ Only use in dev to skip SAN errors
-  });
 
   try {
+    // Try to get token from cookie first
+    const cookieToken = req.cookies?.authToken;
+    if (cookieToken) {
+      const session = verifyToken(cookieToken);
+      rawToken = session.rawToken;
+    } 
+    // Fall back to Authorization header if no cookie
+    else if (req.headers.authorization) {
+      const authHeader = req.headers.authorization;
+      if (authHeader.startsWith('Bearer ')) {
+        rawToken = authHeader.substring(7);
+      } else if (authHeader.startsWith('Token ')) {
+        rawToken = authHeader.substring(6);
+      } else {
+        rawToken = authHeader; // Try raw token
+      }
+    } else {
+      return res.status(401).json({ 
+        success: false, 
+        error: "Missing authentication token" 
+      });
+    }
+
+    if (!rawToken) {
+      return res.status(401).json({ 
+        success: false, 
+        error: "Invalid authentication token format" 
+      });
+    }
+
+    const path = req.params[0];
+    const url = `${targetHost}/${path}`;
+
+    const headers = {
+      Authorization: `Token ${rawToken}`,
+      "Content-Type": req.headers["content-type"] || "application/json",
+    };
+
+    const httpsAgent = new https.Agent({
+      rejectUnauthorized: true,
+      checkServerIdentity: () => undefined,
+    });
+
     const response = await axios({
       method: req.method as any,
       url,
@@ -53,18 +65,25 @@ export async function forwardRequest(req: Request, res: Response) {
   } catch (error) {
     console.error("[Forwarder] Request failed:", error);
 
-    if (axios.isAxiosError(error) && error.response) {
-      return res.status(error.response.status).json({
-        error: error.response.data || "API forwarding failed",
-      });
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        return res.status(error.response.status).json({
+          error: error.response.data?.error || "API forwarding failed",
+          details: error.response.data?.details,
+        });
+      } else if (error.code === 'ECONNABORTED') {
+        return res.status(504).json({
+          error: "Request timeout",
+          details: "The upstream server took too long to respond",
+        });
+      }
     }
 
     return res.status(500).json({
       error: "Unexpected forwarding error",
-      message: (error as Error).message,
+      details: process.env.NODE_ENV === "development" 
+        ? (error as Error).message 
+        : undefined,
     });
   }
 }
-
-
-// rsync -avz --exclude 'node_modules' --exclude 'src' --exclude '.git' ~/Documents/GitHub/akwaabasmsbackend/ root@144.126.202.27:/var/www/smsbackend

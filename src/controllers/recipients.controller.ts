@@ -29,22 +29,22 @@ export async function checkRecipient(req: Request, res: Response) {
     return res.status(500).json({ error: "Failed to check recipient" });
   }
 }
-// Add this new endpoint
+// In recipients.controller.ts, add better validation
 export async function deleteRecipientByPhone(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
 
   const { phone, scheduleId } = req.query;
 
-  if (!phone || !scheduleId) {
+  if (!phone || !scheduleId || isNaN(Number(scheduleId))) {
     return res.status(400).json({
-      error: "Missing phone or scheduleId parameters"
+      error: "Missing or invalid phone/scheduleId parameters"
     });
   }
 
   try {
     const result = await Recipient.delete({
-      phone: phone as string,
+      phone: phone.toString(),
       scheduleId: Number(scheduleId)
     });
     
