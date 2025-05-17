@@ -29,7 +29,36 @@ export async function checkRecipient(req: Request, res: Response) {
     return res.status(500).json({ error: "Failed to check recipient" });
   }
 }
+// Add this new endpoint
+export async function deleteRecipientByPhone(req: Request, res: Response) {
+  const valid = validateSession(req, res);
+  if (!valid) return;
 
+  const { phone, scheduleId } = req.query;
+
+  if (!phone || !scheduleId) {
+    return res.status(400).json({
+      error: "Missing phone or scheduleId parameters"
+    });
+  }
+
+  try {
+    const result = await Recipient.delete({
+      phone: phone as string,
+      scheduleId: Number(scheduleId)
+    });
+    
+    return res.json({
+      success: true,
+      deletedCount: result.affected
+    });
+  } catch (error) {
+    console.error("Delete by phone failed:", error);
+    return res.status(500).json({
+      error: "Failed to delete recipient"
+    });
+  }
+}
 export async function deleteRecipientById(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;

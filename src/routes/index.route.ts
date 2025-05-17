@@ -10,6 +10,7 @@ import {
   deleteRecipientById,
   deleteRecipients,
   listRecipients,
+  deleteRecipientByPhone,
 } from "../controllers/recipients.controller";
 import { getAvailableSchedules, getScheduleDetails, getUsersPerSchedule } from "../controllers/schedule.controller";
 import { getSMSLogs, sendSMS } from "../controllers/sms.controller";
@@ -60,6 +61,7 @@ router.delete("/recipients", deleteRecipients);
 // @route   GET /api/recipients/list
 // @desc    List all recipients filtered by scheduleId, phone, frequency, etc.
 router.get("/recipients/list", listRecipients);
+router.delete("/recipients/by-phone", deleteRecipientByPhone);
 
 
 //
