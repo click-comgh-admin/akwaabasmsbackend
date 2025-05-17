@@ -9,31 +9,31 @@ export class Schedule extends BaseEntity {
   @Column()
   name!: string;
 
-  @Column()
+  @Column({ name: 'starttime' })
   startTime!: string;
 
-  @Column()
+  @Column({ name: 'endtime' })
   endTime!: string;
 
-  @Column('simple-array')
+  @Column({ name: 'days', type: 'simple-array' })
   days!: string[];
 
-  @Column({ nullable: true })
+  @Column({ name: 'latenesstime', nullable: true })
   latenessTime?: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'sendername', nullable: true })
   senderName?: string;
 
   @Column()
   frequency!: string; // 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Annually'
 
-  @Column()
+  @Column({ name: 'meetingeventid' })
   meetingEventId!: number;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'lastsent', type: 'timestamp', nullable: true })
   lastSent?: Date;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'nextsend', type: 'timestamp', nullable: true })
   nextSend?: Date;
 
   @Column({ type: 'text', nullable: true })
