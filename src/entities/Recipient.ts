@@ -12,11 +12,11 @@ export class Recipient extends BaseEntity {
   @Column()
   frequency!: string;
 
-  @Column({ name: 'lastsent', type: 'timestamp' })
+  @Column({ name: 'lastSent', type: 'timestamp' })
   lastSent!: Date;
 
-  @Column({ name: 'scheduleid', nullable: true })
-  scheduleId?: number;
+  @Column({ name: 'scheduleId' })
+  scheduleId!: number;
 
   @ManyToOne(() => Schedule, schedule => schedule.recipients)
   schedule!: Schedule;

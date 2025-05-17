@@ -14,7 +14,7 @@ export class SMSLog extends BaseEntity {
   @Column()
   status!: string; // 'pending' | 'sent' | 'failed'
 
-  @Column({ name: 'sentat', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'sentAt', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   sentAt!: Date;
 
   @Column({ nullable: true })
