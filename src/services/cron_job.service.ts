@@ -23,7 +23,7 @@ export const scheduleBackgroundJobs = (
           for (const recipient of recipients) {
             try {
               const isAdmin = recipient.messageType === 'Admin Summary';
-              const senderName = isAdmin ? 'AKWAABA' : schedule.senderName;
+const senderName = isAdmin ? 'AKWAABA' : schedule.senderName || 'AKWAABA';
               
               const data = await attendanceService.getAttendanceSummary(
                 recipient.phone,
@@ -32,8 +32,10 @@ export const scheduleBackgroundJobs = (
                 schedule.lastSent
               );
               
-              const message = scheduleService.formatMessage(data, schedule.template);
-              await smsService.sendSMS({
+if (!schedule.template) {
+  throw new Error(`No template defined for schedule ${schedule.id}`);
+}
+const message = scheduleService.formatMessage(data, schedule.template);              await smsService.sendSMS({
                 from: senderName,
                 to: recipient.phone,
                 content: message,

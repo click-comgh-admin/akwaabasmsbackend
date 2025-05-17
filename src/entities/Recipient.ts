@@ -1,4 +1,5 @@
-import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { BaseEntity, Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import { Schedule } from './Schedule';
 
 @Entity()
 export class Recipient extends BaseEntity {
@@ -17,17 +18,18 @@ export class Recipient extends BaseEntity {
   @Column({ nullable: true })
   scheduleId?: number;
 
+  @ManyToOne(() => Schedule, schedule => schedule.recipients)
+  schedule!: Schedule;
+
   @Column()
   messageType!: string;
 
   @Column()
   clientCode!: string;
 
-  @Column()
-  isAdmin!: boolean;
+  @Column({ default: false })
+  isAdmin!: boolean;  // Add this line
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt!: Date;
 }
-
-export default Recipient;
