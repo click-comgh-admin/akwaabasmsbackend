@@ -11,21 +11,20 @@ export class SMSLog extends BaseEntity {
   @Column('text')
   message!: string;
 
-  @Column({
-    type: 'enum',
-    enum: ['pending', 'sent', 'failed'],
-    default: 'pending'
-  })
-  status!: 'pending' | 'sent' | 'failed';
+  @Column()
+  status!: string; // 'pending' | 'sent' | 'failed'
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  error?: string;
-
-  @Column({ name: 'sentAt', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   sentAt!: Date;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ nullable: true })
   frequency?: string;
+
+  @Column({ nullable: true })
+  error?: string;
+
+  @Column({ nullable: true })
+  messageId?: string;
 
   @Column({ type: 'json', nullable: true })
   response?: any;
