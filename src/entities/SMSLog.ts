@@ -1,6 +1,6 @@
 import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-@Entity({ name: 'sms_log' }) // Explicitly set table name to match database
+@Entity({ name: 'sms_log' })
 export class SMSLog extends BaseEntity {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -8,17 +8,13 @@ export class SMSLog extends BaseEntity {
   @Column()
   recipient!: string;
 
-  @Column({ type: 'text' })
+  @Column('text')
   message!: string;
 
   @Column()
   status!: string; // 'pending' | 'sent' | 'failed'
 
-  @Column({ 
-    type: 'timestamp', 
-    name: 'sentat', // Match database column name
-    default: () => 'CURRENT_TIMESTAMP' 
-  })
+  @Column({ name: 'sentat', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   sentAt!: Date;
 
   @Column({ nullable: true })
@@ -27,16 +23,9 @@ export class SMSLog extends BaseEntity {
   @Column({ nullable: true })
   error?: string;
 
-  @Column({ 
-    nullable: true,
-    name: 'messageid' // Match database column name
-  })
+  @Column({ name: 'messageid', nullable: true })
   messageId?: string;
 
-  @Column({ 
-    type: 'json', 
-    nullable: true,
-    name: 'response' // Explicitly match database column name
-  })
+  @Column({ type: 'json', nullable: true })
   response?: any;
 }

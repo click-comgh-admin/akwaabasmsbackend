@@ -12,10 +12,10 @@ export class Recipient extends BaseEntity {
   @Column()
   frequency!: string;
 
-  @Column({ type: 'timestamp', name: 'lastsent' })
+  @Column({ name: 'lastsent', type: 'timestamp' })
   lastSent!: Date;
 
-  @Column({ nullable: true, name: 'scheduleid' })
+  @Column({ name: 'scheduleid', nullable: true })
   scheduleId?: number;
 
   @ManyToOne(() => Schedule, schedule => schedule.recipients)
@@ -27,9 +27,9 @@ export class Recipient extends BaseEntity {
   @Column({ name: 'clientcode' })
   clientCode!: string;
 
-  @Column({ default: false, name: 'isadmin' })
+  @Column({ name: 'isadmin', default: false })
   isAdmin!: boolean;
 
-  @Column({ type: 'timestamp', name: 'createdat', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'createdat', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt!: Date;
 }
