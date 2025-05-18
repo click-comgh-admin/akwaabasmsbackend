@@ -127,6 +127,35 @@ export async function sendSMS(req: Request, res: Response) {
     });
   }
 }
+export const getSMSLogs = async (req: Request, res: Response) => {
+  const valid = validateSession(req, res);
+  if (!valid) return;
+
+  const { limit = 100, status, phone } = req.query;
+
+  try {
+    const queryBuilder = SMSLog.createQueryBuilder('log')
+      .orderBy('log.sentAt', 'DESC')
+      .take(Number(limit));
+
+    if (status) queryBuilder.andWhere('log.status = :status', { status });
+    if (phone) queryBuilder.andWhere('log.recipient LIKE :phone', { phone: `%${phone}%` });
+
+    const logs = await queryBuilder.getMany();
+    return res.json({
+      success: true,
+      count: logs.length,
+      data: logs,
+    });
+  } catch (error) {
+    const err = error as Error;
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch logs",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
+  }
+};
 
 function formatPhoneNumber(phone: string): string | null {
   if (!phone) return null;
