@@ -32,7 +32,7 @@ export async function getAttendanceStats(req: Request, res: Response) {
 
   if (!scheduleId || !startDate || !endDate) {
     return res.status(400).json({
-      error: "Missing required parameters: scheduleId, startDate, endDate",
+      error: "Missing required parameters: scheduleId, startDate, endDate"
     });
   }
 
@@ -45,11 +45,6 @@ export async function getAttendanceStats(req: Request, res: Response) {
     return res.status(400).json({ error: "Schedule ID must be positive" });
   }
 
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(startDate as string) || !dateRegex.test(endDate as string)) {
-    return res.status(400).json({ error: "Invalid date format (use YYYY-MM-DD)" });
-  }
-
   try {
     const baseURL = process.env.ATTENDANCE_API_URL;
     if (!baseURL) throw new Error("Attendance API URL not configured");
@@ -59,26 +54,24 @@ export async function getAttendanceStats(req: Request, res: Response) {
       "Content-Type": "application/json"
     };
 
-    const scheduleRes = await axios.get<Schedule>(
-      `${baseURL}/attendance/meeting-event/schedule/${scheduleId}`,
-      { headers }
-    );
-    const schedule = scheduleRes.data;
-
-    const attendanceRes = await axios.get<{ results: AttendanceRecord[] }>(
-      `${baseURL}/attendance/meeting-event/attendance`,
-      { 
-        headers,
-        params: {
-          start_date: startDate,
-          end_date: endDate,
-          meetingEventId: scheduleId,
-          length: 1000
+    const [scheduleRes, attendanceRes] = await Promise.all([
+      axios.get<Schedule>(`${baseURL}/attendance/meeting-event/schedule/${scheduleId}`, { headers }),
+      axios.get<{ results: AttendanceRecord[] }>(
+        `${baseURL}/attendance/meeting-event/attendance`,
+        { 
+          headers,
+          params: {
+            start_date: startDate,
+            end_date: endDate,
+            meetingEventId: scheduleId,
+            length: 1000
+          }
         }
-      }
-    );
+      )
+    ]);
 
     const records = attendanceRes.data?.results || [];
+    const schedule = scheduleRes.data;
 
     if (isAdmin === "true") {
       const stats = calculateAdminStats(records, schedule);
@@ -132,7 +125,7 @@ function calculateAdminStats(records: AttendanceRecord[], schedule: Schedule) {
 }
 
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
-  let stats = {
+  const stats = {
     clockIns: 0,
     clockOuts: 0,
     lateDays: 0,
@@ -153,8 +146,7 @@ function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
 
       if (record.outTime) {
         stats.clockOuts++;
-        const workHours = calculateWorkHours(record.inTime, record.outTime);
-        stats.totalWorkHours += workHours;
+        stats.totalWorkHours += calculateWorkHours(record.inTime, record.outTime);
 
         if (schedule.end_time) {
           const overtime = calculateOvertime(record.date, record.outTime, schedule.end_time);
@@ -176,29 +168,30 @@ function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
 }
 
 function calculateWorkMetrics(records: AttendanceRecord[], schedule: Schedule) {
-  let totalWorkHours = 0;
-  let overtimeDays = 0;
-  let totalOvertime = 0;
+  const metrics = {
+    totalWorkHours: 0,
+    overtimeDays: 0,
+    totalOvertime: 0
+  };
 
   records.forEach(record => {
     if (record.inTime && record.outTime) {
-      totalWorkHours += calculateWorkHours(record.inTime, record.outTime);
+      metrics.totalWorkHours += calculateWorkHours(record.inTime, record.outTime);
 
       if (schedule.end_time) {
         const overtime = calculateOvertime(record.date, record.outTime, schedule.end_time);
         if (overtime > 0) {
-          overtimeDays++;
-          totalOvertime += overtime;
+          metrics.overtimeDays++;
+          metrics.totalOvertime += overtime;
         }
       }
     }
   });
 
-  return {
-    totalWorkHours: Math.round(totalWorkHours),
-    overtimeDays,
-    totalOvertime: Math.round(totalOvertime)
-  };
+  metrics.totalWorkHours = Math.round(metrics.totalWorkHours);
+  metrics.totalOvertime = Math.round(metrics.totalOvertime);
+
+  return metrics;
 }
 
 function calculateWorkHours(inTime: string, outTime: string): number {
