@@ -32,23 +32,13 @@ export async function sendSMS(req: Request, res: Response) {
     });
   }
 
-  if (content.length > 160) {
-    return res.status(400).json({
-      success: false,
-      error: "Message content exceeds 160 character limit",
-    });
-  }
-
   try {
     const smsService = new HubtelSMS(
       process.env.HUBTEL_CLIENT_ID!,
       process.env.HUBTEL_CLIENT_SECRET!
     );
 
-    const results = [];
-    let successfulSends = 0;
-
-    for (const phone of recipients) {
+    const results = await Promise.all(recipients.map(async (phone) => {
       const logEntry = new SMSLog();
       logEntry.recipient = phone;
       logEntry.message = content;
@@ -67,7 +57,6 @@ export async function sendSMS(req: Request, res: Response) {
             phone: formattedPhone,
             scheduleId: Number(scheduleId),
           });
-
           if (existing) {
             throw new Error("Recipient already exists for this schedule");
           }
@@ -80,7 +69,7 @@ export async function sendSMS(req: Request, res: Response) {
         }) as HubtelResponse;
 
         if (!hubtelResponse || hubtelResponse.Status !== "0") {
-          throw new Error(hubtelResponse?.Message || "No response from Hubtel");
+          throw new Error(hubtelResponse?.Message || "SMS gateway error");
         }
 
         if (!isAdmin) {
@@ -89,9 +78,9 @@ export async function sendSMS(req: Request, res: Response) {
           recipient.frequency = frequency;
           recipient.lastSent = new Date();
           recipient.scheduleId = Number(scheduleId);
-          recipient.messageType = isAdmin ? "Admin Summary" : "User Summary";
+          recipient.messageType = "User Summary";
           recipient.clientCode = valid.session.clientCode;
-          recipient.isAdmin = isAdmin;
+          recipient.isAdmin = false;
           await recipient.save();
         }
 
@@ -100,27 +89,26 @@ export async function sendSMS(req: Request, res: Response) {
         logEntry.response = hubtelResponse;
         await logEntry.save();
 
-        successfulSends++;
-        results.push({ 
+        return { 
           phone: formattedPhone, 
           success: true,
           messageId: hubtelResponse.MessageId
-        });
-
+        };
       } catch (error) {
         const errorMsg = (error as Error).message;
         logEntry.status = 'failed';
         logEntry.error = errorMsg.substring(0, 255);
         await logEntry.save();
 
-        results.push({
+        return {
           phone,
           success: false,
-          error: errorMsg,
-        });
+          error: errorMsg
+        };
       }
-    }
+    }));
 
+    const successfulSends = results.filter(r => r.success).length;
     return res.json({
       success: true,
       total: recipients.length,
@@ -130,11 +118,12 @@ export async function sendSMS(req: Request, res: Response) {
     });
 
   } catch (error) {
-    const err = error as Error;
     return res.status(500).json({
       success: false,
-      error: "Failed to send SMS",
-      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+      error: "SMS processing failed",
+      details: process.env.NODE_ENV === "development" 
+        ? (error as Error).message 
+        : undefined,
     });
   }
 }
@@ -142,41 +131,11 @@ export async function sendSMS(req: Request, res: Response) {
 function formatPhoneNumber(phone: string): string | null {
   if (!phone) return null;
   const cleaned = phone.replace(/\D/g, '');
-
+  
   if (cleaned.match(/^0\d{9}$/)) return `+233${cleaned.substring(1)}`;
   if (cleaned.match(/^233\d{9}$/)) return `+${cleaned}`;
   if (cleaned.match(/^\+\d{10,15}$/)) return phone;
   if (cleaned.match(/^\d{10,15}$/)) return `+${cleaned}`;
-
+  
   return null;
-}
-
-export async function getSMSLogs(req: Request, res: Response) {
-  const valid = validateSession(req, res);
-  if (!valid) return;
-
-  const { limit = 100, status, phone } = req.query;
-
-  try {
-    const queryBuilder = SMSLog.createQueryBuilder('log')
-      .orderBy('log.sentAt', 'DESC')
-      .take(Number(limit));
-
-    if (status) queryBuilder.andWhere('log.status = :status', { status });
-    if (phone) queryBuilder.andWhere('log.recipient LIKE :phone', { phone: `%${phone}%` });
-
-    const logs = await queryBuilder.getMany();
-    return res.json({
-      success: true,
-      count: logs.length,
-      data: logs,
-    });
-  } catch (error) {
-    const err = error as Error;
-    return res.status(500).json({
-      success: false,
-      error: "Failed to fetch logs",
-      details: process.env.NODE_ENV === "development" ? err.message : undefined,
-    });
-  }
 }
