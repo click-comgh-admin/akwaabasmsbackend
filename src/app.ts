@@ -89,7 +89,7 @@ const startApplicationServices = (): void => {
 
   const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    scheduleBackgroundJobs(smsService, scheduleService, attendanceService);
+    scheduleBackgroundJobs(smsService, attendanceService);
   });
 
   process.on("SIGINT", () => shutdown(server));
