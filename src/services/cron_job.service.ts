@@ -85,7 +85,14 @@ export const scheduleBackgroundJobs = (
 
   const scheduleSMSJob = async (schedule: Schedule) => {
     try {
-      const { frequency, startTime } = schedule;
+      const { frequency, startTime, isActive } = schedule;
+      
+      // Skip if schedule is not active
+      if (!isActive) {
+        console.log(`Skipping inactive schedule ${schedule.id}`);
+        return;
+      }
+
       const [hours, minutes] = startTime.split(":").map(Number);
 
       const jobCallback = async () => {
@@ -165,14 +172,15 @@ export const scheduleBackgroundJobs = (
 
   const initializeSchedules = async () => {
     try {
-      // Remove the isActive filter since it's not in your entity
-      const activeSchedules = await scheduleRepo.find();
-      console.log(`Found ${activeSchedules.length} schedules.`);
+      const activeSchedules = await scheduleRepo.find({ where: { isActive: true } });
+      console.log(`Found ${activeSchedules.length} active schedules.`);
 
+      // Cancel all existing jobs
       for (const job in cron.scheduledJobs) {
         cron.cancelJob(job);
       }
 
+      // Schedule new jobs
       for (const schedule of activeSchedules) {
         await scheduleSMSJob(schedule);
       }
@@ -181,6 +189,9 @@ export const scheduleBackgroundJobs = (
     }
   };
 
+  // Initialize schedules on startup
   initializeSchedules();
+  
+  // Refresh schedules every day at midnight
   cron.scheduleJob("0 0 * * *", initializeSchedules);
 };

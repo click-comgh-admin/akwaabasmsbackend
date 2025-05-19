@@ -39,6 +39,9 @@ export class Schedule extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   template?: string;
 
+  @Column({ default: true })
+  isActive!: boolean;
+
   @OneToMany(() => Recipient, recipient => recipient.schedule)
   recipients!: Recipient[];
 }
