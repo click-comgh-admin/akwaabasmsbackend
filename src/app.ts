@@ -37,13 +37,7 @@ app.get("/health", (req, res) => {
 const initializeDatabase = async (attempt = 1): Promise<void> => {
   try {
     console.log(`📡 Connecting to database (Attempt ${attempt}/${MAX_RETRIES})`);
-    console.table({
-      Host: process.env.DB_HOST,
-      Port: process.env.DB_PORT,
-      Database: process.env.DB_NAME,
-      User: process.env.DB_USER,
-    });
-
+    
     await AppDataSource.initialize();
     console.log("✅ Database connected successfully");
 
@@ -53,7 +47,26 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
       console.log("✅ Migrations completed");
     }
 
-    await startApplicationServices();
+    // Initialize services after DB is ready
+    const smsService = new HubtelSMS(
+      process.env.HUBTEL_CLIENT_ID!,
+      process.env.HUBTEL_CLIENT_SECRET!
+    );
+
+    const attendanceService = new AttendanceService(
+      process.env.ATTENDANCE_API_URL!,
+      process.env.ATTENDANCE_API_TOKEN!
+    );
+
+    // Start server after everything is ready
+    const server = app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      scheduleBackgroundJobs(smsService, attendanceService);
+    });
+
+    process.on("SIGINT", () => shutdown(server));
+    process.on("SIGTERM", () => shutdown(server));
+
   } catch (error) {
     console.error(`❌ Connection failed (Attempt ${attempt}):`, error);
 
@@ -64,34 +77,6 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
       process.exit(1);
     }
   }
-};
-
-const startApplicationServices = async (): Promise<void> => {
-  const smsService = new HubtelSMS(
-    process.env.HUBTEL_CLIENT_ID!,
-    process.env.HUBTEL_CLIENT_SECRET!
-  );
-
-  const attendanceService = new AttendanceService(
-    process.env.ATTENDANCE_API_URL!,
-    process.env.ATTENDANCE_API_TOKEN!
-  );
-
-  if (!AppDataSource.isInitialized) {
-    await AppDataSource.initialize();
-  }
-
-  const server = app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    try {
-      scheduleBackgroundJobs(smsService, attendanceService);
-    } catch (error) {
-      console.error("Failed to start cron jobs:", error);
-    }
-  });
-
-  process.on("SIGINT", () => shutdown(server));
-  process.on("SIGTERM", () => shutdown(server));
 };
 
 const shutdown = (server: ReturnType<typeof app.listen>): void => {

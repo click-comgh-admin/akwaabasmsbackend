@@ -165,8 +165,9 @@ export const scheduleBackgroundJobs = (
 
   const initializeSchedules = async () => {
     try {
-      const activeSchedules = await scheduleRepo.find({ where: { isActive: true } as any });
-      console.log(`Found ${activeSchedules.length} active schedules.`);
+      // Remove the isActive filter since it's not in your entity
+      const activeSchedules = await scheduleRepo.find();
+      console.log(`Found ${activeSchedules.length} schedules.`);
 
       for (const job in cron.scheduledJobs) {
         cron.cancelJob(job);
@@ -181,6 +182,5 @@ export const scheduleBackgroundJobs = (
   };
 
   initializeSchedules();
-
-  cron.scheduleJob("0 0 * * *", initializeSchedules as any);
+  cron.scheduleJob("0 0 * * *", initializeSchedules);
 };
