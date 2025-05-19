@@ -1,14 +1,12 @@
 import cron from "node-schedule";
-import { getRepository } from "typeorm";
-import { Schedule } from "../entities/Schedule";
-import { HubtelSMS } from "../services/sms.service";
 import { format, subDays } from "date-fns";
-import { AttendanceService } from "../services/attendance.service";
+import { AppDataSource } from "../config/data-source";
+import { Schedule } from "../entities/Schedule";
+import { HubtelSMS } from "./sms.service";
+import { AttendanceService } from "./attendance.service";
 
-// Timezone configuration (e.g., Africa/Accra)
 const TIMEZONE = "Africa/Accra";
 
-// Helper: Format message with placeholders
 function formatMessage(
   stats: any,
   template: string,
@@ -23,7 +21,6 @@ function formatMessage(
     .replace(/\[DateRange\]/g, dateRange);
 }
 
-// Helper: Get start date based on frequency
 function getStartDate(frequency: string): string {
   const now = new Date();
   let startDate: Date;
@@ -51,7 +48,6 @@ function getStartDate(frequency: string): string {
   return format(startDate, "yyyy-MM-dd");
 }
 
-// Helper: Format date range for display
 function getDateRange(frequency: string): string {
   const now = new Date();
   let startDate: Date;
@@ -77,20 +73,21 @@ function getDateRange(frequency: string): string {
   }
 }
 
-// ... (keep all previous imports and helper functions)
-
 export const scheduleBackgroundJobs = (
   smsService: HubtelSMS,
   attendanceService: AttendanceService
 ): void => {
-  const scheduleRepo = getRepository(Schedule);
+  if (!AppDataSource.isInitialized) {
+    throw new Error("Database connection not initialized");
+  }
+
+  const scheduleRepo = AppDataSource.getRepository(Schedule);
 
   const scheduleSMSJob = async (schedule: Schedule) => {
     try {
       const { frequency, startTime } = schedule;
       const [hours, minutes] = startTime.split(":").map(Number);
 
-      // Create the job callback function
       const jobCallback = async () => {
         console.log(`[${format(new Date(), "yyyy-MM-dd HH:mm:ss")}] Running SMS job for schedule ${schedule.id}...`);
 
@@ -140,7 +137,6 @@ export const scheduleBackgroundJobs = (
         }
       };
 
-      // Schedule the job with the appropriate parameters
       switch (frequency) {
         case "Daily":
           cron.scheduleJob(`schedule-${schedule.id}`, `0 ${minutes} ${hours} * * *`, jobCallback);
@@ -169,9 +165,7 @@ export const scheduleBackgroundJobs = (
 
   const initializeSchedules = async () => {
     try {
-      const activeSchedules = await scheduleRepo.find({ 
-        where: { isActive: true } as any 
-      });
+      const activeSchedules = await scheduleRepo.find({ where: { isActive: true } as any });
       console.log(`Found ${activeSchedules.length} active schedules.`);
 
       for (const job in cron.scheduledJobs) {
@@ -186,9 +180,7 @@ export const scheduleBackgroundJobs = (
     }
   };
 
-  // Initialize on startup
   initializeSchedules();
 
-  // Schedule daily re-initialization at midnight
-  cron.scheduleJob("0 0 * * *", initializeSchedules);
+  cron.scheduleJob("0 0 * * *", initializeSchedules as any);
 };

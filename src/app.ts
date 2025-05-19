@@ -1,4 +1,3 @@
-// src/app.ts
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -10,16 +9,13 @@ import { AppDataSource } from "./config/data-source";
 import routes from "./routes/index.route";
 import { allowedOrigins } from "./config/cors";
 import { HubtelSMS } from "./services/sms.service";
-import { ScheduleService } from "./services/schedule.service";
 import { AttendanceService } from "./services/attendance.service";
 import { scheduleBackgroundJobs } from "./services/cron_job.service";
 
-// Constants
 const MAX_RETRIES = 5;
 const RETRY_DELAY = 5000;
-const PORT = Number(5550);
+const PORT = Number(process.env.PORT || 5550);
 
-// Express App Setup
 const app = express();
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 });
 
@@ -38,7 +34,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Initialize Database and Start Server
 const initializeDatabase = async (attempt = 1): Promise<void> => {
   try {
     console.log(`📡 Connecting to database (Attempt ${attempt}/${MAX_RETRIES})`);
@@ -58,7 +53,7 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
       console.log("✅ Migrations completed");
     }
 
-    startApplicationServices();
+    await startApplicationServices();
   } catch (error) {
     console.error(`❌ Connection failed (Attempt ${attempt}):`, error);
 
@@ -71,15 +66,10 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
   }
 };
 
-const startApplicationServices = (): void => {
+const startApplicationServices = async (): Promise<void> => {
   const smsService = new HubtelSMS(
     process.env.HUBTEL_CLIENT_ID!,
     process.env.HUBTEL_CLIENT_SECRET!
-  );
-
-  const scheduleService = new ScheduleService(
-    process.env.ATTENDANCE_API_URL!,
-    process.env.ATTENDANCE_API_TOKEN!
   );
 
   const attendanceService = new AttendanceService(
@@ -87,9 +77,17 @@ const startApplicationServices = (): void => {
     process.env.ATTENDANCE_API_TOKEN!
   );
 
+  if (!AppDataSource.isInitialized) {
+    await AppDataSource.initialize();
+  }
+
   const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    scheduleBackgroundJobs(smsService, attendanceService);
+    try {
+      scheduleBackgroundJobs(smsService, attendanceService);
+    } catch (error) {
+      console.error("Failed to start cron jobs:", error);
+    }
   });
 
   process.on("SIGINT", () => shutdown(server));
@@ -113,7 +111,6 @@ const shutdown = (server: ReturnType<typeof app.listen>): void => {
   }, 10_000);
 };
 
-// Start App
 initializeDatabase().catch((err) => {
   console.error("❌ Failed to initialize application:", err);
   process.exit(1);
