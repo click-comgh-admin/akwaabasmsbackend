@@ -5,6 +5,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
+import { allowedOrigins } from "./config/cors";
 import { DataSource } from "typeorm";
 import { Schedule } from "./entities/Schedule";
 import { Recipient } from "./entities/Recipient";
@@ -56,8 +57,18 @@ export const AppDataSource = new DataSource({
 // Middleware
 app.use(cookieParser());
 app.use(cors({ 
-  origin: process.env.ALLOWED_ORIGINS?.split(",") || "*", 
-  credentials: true 
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  exposedHeaders: ['set-cookie']
 }));
 app.use(express.json({ limit: "60mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
