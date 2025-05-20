@@ -1,5 +1,6 @@
 import { Schedule } from '../entities/Schedule';
 import { Recipient } from '../entities/Recipient';
+import { getRepository } from 'typeorm';
 import { getDateRange } from '../utils/date';
 import axios from 'axios';
 
@@ -38,19 +39,23 @@ export class ScheduleService {
       .getMany();
   }
 
-  async getRecipients(scheduleId: number, maxRetries = 3) {
-    let lastError: Error | undefined;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await Recipient.findBy({ scheduleId });
-      } catch (error) {
-        lastError = error as Error;
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-      }
+// schedule.service.ts
+async getRecipients(scheduleId: number, maxRetries = 3) {
+  let lastError: Error | undefined;
+  const recipientRepo = getRepository(Recipient); // Add this at the top: import { getRepository } from "typeorm";
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await recipientRepo.find({ 
+        where: { scheduleId } 
+      });
+    } catch (error) {
+      lastError = error as Error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
     }
-    throw lastError;
   }
-
+  throw lastError;
+}
   async updateLastSent(scheduleId: number) {
     const schedule = await Schedule.findOneBy({ id: scheduleId });
     if (!schedule) return;

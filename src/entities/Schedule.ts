@@ -25,7 +25,7 @@ export class Schedule extends BaseEntity {
   senderName?: string;
 
   @Column()
-  frequency!: string; // 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Annually'
+  frequency!: string;
 
   @Column({ name: 'meetingeventid' })
   meetingEventId!: number;
@@ -42,6 +42,6 @@ export class Schedule extends BaseEntity {
   @Column({ default: true })
   isActive!: boolean;
 
-  @OneToMany(() => Recipient, recipient => recipient.schedule)
+  @OneToMany(() => Recipient, (recipient) => recipient.schedule)
   recipients!: Recipient[];
 }

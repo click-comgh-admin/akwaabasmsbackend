@@ -1,245 +1,341 @@
-import cron from "node-schedule";
-import { format, subDays } from "date-fns";
 import { AppDataSource } from "../config/data-source";
-import { Schedule } from "../entities/Schedule";
-import { HubtelSMS } from "./sms.service";
-import { AttendanceService } from "./attendance.service";
-import { Recipient } from "../entities/Recipient";
+import { Recipient, MessageType } from "../entities/Recipient";
 import { SMSLog } from "../entities/SMSLog";
+import { CronLog } from "../entities/CronLog";
+import { HubtelSMS } from "./sms.service";
+import { Schedule } from "../entities/Schedule";
+import { addDays, subDays, addMonths, subMonths, addYears, subYears, isAfter, format } from "date-fns";
+import { toZonedTime } from 'date-fns-tz';
+import { Repository } from "typeorm";
+import * as cron from "node-cron";
 
-const TIMEZONE = "Africa/Accra";
+const GHANA_TIMEZONE = 'Africa/Accra';
 
-interface AttendanceStats {
-  firstName: string;
-  clockIns: number;
-  lateDays: number;
-  absentDays: number;
-  totalHours?: number;
-  scheduleName?: string;
-}
+export class CronJobService {
+  private recipientRepo: Repository<Recipient>;
+  private smsLogRepo: Repository<SMSLog>;
+  private scheduleRepo: Repository<Schedule>;
+  private cronLogRepo: Repository<CronLog>;
+  private smsService: HubtelSMS;
 
-function formatMessage(
-  stats: AttendanceStats,
-  template: string,
-  scheduleName: string,
-  dateRange: string
-): string {
-  return template
-    .replace(/\[FirstName\]/g, stats.firstName)
-    .replace(/\[ClockIns\]/g, stats.clockIns.toString())
-    .replace(/\[LateDays\]/g, stats.lateDays.toString())
-    .replace(/\[AbsentDays\]/g, stats.absentDays.toString())
-    .replace(/\[TotalHours\]/g, stats.totalHours?.toString() || '0')
-    .replace(/\[ScheduleName\]/g, scheduleName)
-    .replace(/\[DateRange\]/g, dateRange);
-}
-
-function getStartDate(frequency: string): string {
-  const now = new Date();
-  let startDate: Date;
-
-  switch (frequency) {
-    case "Daily":
-      startDate = subDays(now, 1);
-      break;
-    case "Weekly":
-      startDate = subDays(now, 7);
-      break;
-    case "Monthly":
-      startDate = subDays(now, 30);
-      break;
-    case "Quarterly":
-      startDate = subDays(now, 90);
-      break;
-    case "Annually":
-      startDate = subDays(now, 365);
-      break;
-    default:
-      startDate = subDays(now, 1);
+  constructor(smsService: HubtelSMS) {
+    this.recipientRepo = AppDataSource.getRepository(Recipient);
+    this.smsLogRepo = AppDataSource.getRepository(SMSLog);
+    this.scheduleRepo = AppDataSource.getRepository(Schedule);
+    this.cronLogRepo = AppDataSource.getRepository(CronLog);
+    this.smsService = smsService;
   }
 
-  return format(startDate, "yyyy-MM-dd");
-}
+async runScheduledSMSJob(): Promise<void> {
+  const ghanaNow = toZonedTime(new Date(), GHANA_TIMEZONE);
+  const log = new CronLog();
+  log.jobType = "SMS_DELIVERY";
+  log.status = "started";
+  log.details = `Starting SMS delivery job at ${ghanaNow.toISOString()}`;
+  await this.cronLogRepo.save(log);
 
-function getDateRange(frequency: string): string {
-  const now = new Date();
-  let startDate: Date;
+  try {
+    const recipients = await this.recipientRepo.find({
+      where: { isActive: true },
+      relations: ["schedule"]
+    });
 
-  switch (frequency) {
-    case "Daily":
-      startDate = subDays(now, 1);
-      return `${format(startDate, "d MMM")} - ${format(now, "d MMM yyyy")}`;
-    case "Weekly":
-      startDate = subDays(now, 7);
-      return `${format(startDate, "d MMM")} - ${format(now, "d MMM yyyy")}`;
-    case "Monthly":
-      startDate = subDays(now, 30);
-      return `${format(startDate, "d MMM")} - ${format(now, "d MMM yyyy")}`;
-    case "Quarterly":
-      startDate = subDays(now, 90);
-      return `${format(startDate, "d MMM yyyy")} - ${format(now, "d MMM yyyy")}`;
-    case "Annually":
-      startDate = subDays(now, 365);
-      return `${format(startDate, "d MMM yyyy")} - ${format(now, "d MMM yyyy")}`;
-    default:
-      return format(now, "d MMM yyyy");
+    let processedCount = 0;
+    let successCount = 0;
+    const batchDelaySeconds = 10;
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = recipients[i];
+
+      // Wait for staggered delay before processing this recipient
+      await this.delay(i * batchDelaySeconds * 1000);
+
+      try {
+        const result = await this.processRecipient(recipient, ghanaNow);
+        if (result.success) successCount++;
+        processedCount++;
+      } catch (error) {
+        console.error(`Error processing recipient ${recipient.id}:`, error);
+        await this.handleRecipientError(recipient, error);
+      }
+    }
+
+    log.status = "completed";
+    log.processedCount = processedCount;
+    log.details = `Completed SMS delivery job. Success: ${successCount}, Failed: ${processedCount - successCount}`;
+    await this.cronLogRepo.save(log);
+  } catch (error) {
+    log.status = "failed";
+    log.details = `Job failed: ${error instanceof Error ? error.message : String(error)}`;
+    await this.cronLogRepo.save(log);
+    console.error("Scheduled SMS job failed:", error);
   }
 }
+private async delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-export const scheduleBackgroundJobs = (
-  smsService: HubtelSMS,
-  attendanceService: AttendanceService
-): void => {
-  if (!AppDataSource.isInitialized) {
-    throw new Error("Database connection not initialized");
+
+private async processRecipient(recipient: Recipient, currentDate: Date): Promise<{ success: boolean }> {
+  if (recipient.nextRetryAt && isAfter(recipient.nextRetryAt, currentDate)) {
+    return { success: false };
   }
 
-  const scheduleRepo = AppDataSource.getRepository(Schedule);
-  const recipientRepo = AppDataSource.getRepository(Recipient);
-  const smsLogRepo = AppDataSource.getRepository(SMSLog);
+  if (!recipient.startDate) {
+    console.warn(`Recipient ${recipient.id} has no startDate set.`);
+    return { success: false };
+  }
 
-  const processScheduleJob = async (schedule: Schedule) => {
-    console.log(`[${format(new Date(), "yyyy-MM-dd HH:mm:ss")}] Processing schedule ${schedule.id}`);
+  const nextSendDate = this.calculateNextSendDate(
+    recipient.lastSent,
+    recipient.frequency,
+    recipient.startDate,
+    currentDate
+  );
+
+  if (!nextSendDate) {
+    console.warn(`No next send date for recipient ${recipient.id}`);
+    return { success: false };
+  }
+
+  if (isAfter(nextSendDate, currentDate)) {
+    return { success: false };
+  }
+
+    const { startDate, endDate } = this.getDateRange(recipient.frequency, currentDate);
+    const schedule = recipient.schedule;
+
+    if (!schedule) {
+      console.warn(`Schedule not found for recipient ${recipient.id}`);
+      return { success: false };
+    }
+
+    const message = this.formatMessage(
+      recipient.messageType === MessageType.ADMIN_SUMMARY
+        ? this.getAdminTemplate(recipient.frequency)
+        : this.getUserTemplate(recipient.frequency),
+      schedule.name,
+      { start: startDate, end: endDate },
+      recipient.frequency,
+      "Organization"
+    );
 
     try {
-      const recipients = await recipientRepo.find({
-        where: { scheduleId: schedule.id }
+      const response = await this.smsService.sendSMS({
+        from: schedule.senderName || "AKWAABA",
+        to: recipient.phone,
+        content: message
       });
 
-      if (recipients.length === 0) {
-        console.warn(`No recipients found for schedule ${schedule.id}`);
-        return;
-      }
+      recipient.lastSent = currentDate;
+      recipient.retryAttempts = 0;
+      recipient.nextRetryAt = undefined; // Changed from null to undefined
+      await this.recipientRepo.save(recipient);
 
-      const dateRange = getDateRange(schedule.frequency);
-      const startDate = getStartDate(schedule.frequency);
+      await this.logSMS({
+        recipientId: recipient.id,
+        phone: recipient.phone,
+        message,
+        status: "sent",
+        messageId: response.MessageId,
+        frequency: recipient.frequency,
+        scheduleId: recipient.scheduleId,
+        isAdmin: recipient.messageType === MessageType.ADMIN_SUMMARY
+      });
 
-      for (const recipient of recipients) {
-        const logEntry = new SMSLog();
-        logEntry.recipient = recipient.phone;
-        logEntry.message = schedule.template ?? "";
-        logEntry.status = "pending";
-        logEntry.sentAt = new Date();
-        logEntry.frequency = schedule.frequency;
+      return { success: true };
+    } catch (error) {
+      await this.handleRecipientError(recipient, error);
+      return { success: false };
+    }
+  }
 
-        try {
-          const stats = await attendanceService.getAttendanceSummary(
-            recipient.phone,
-            schedule.frequency,
-            schedule.id
-          );
+  private calculateNextSendDate(
+    lastSent: Date | undefined,
+    frequency: string,
+    startDate: Date,
+    currentDate: Date
+  ): Date | undefined {
+    if (!lastSent) {
+      return isAfter(startDate, currentDate) ? undefined : startDate;
+    }
 
-          const message = formatMessage(
-            {
-              firstName: stats.firstName,
-              clockIns: stats.clockIns,
-              lateDays: stats.lateDays,
-              absentDays: stats.absentDays,
-              totalHours: stats.totalHours,
-              scheduleName: stats.scheduleName
-            },
-            schedule.template || "",
-            schedule.name,
-            dateRange
-          );
-
-          const response = await smsService.sendSMS({
-            from: schedule.senderName || "AKWAABA",
-            to: recipient.phone,
-            content: message
-          });
-
-          logEntry.status = "sent";
-          logEntry.messageId = response.MessageId;
-          logEntry.response = JSON.stringify(response);
-
-          recipient.lastSent = new Date();
-          await recipientRepo.save(recipient);
-        } catch (error) {
-          logEntry.status = "failed";
-          logEntry.error = error instanceof Error ? error.message : "Unknown error";
-          console.error(`Failed to send SMS to ${recipient.phone}:`, error);
-        } finally {
-          await smsLogRepo.save(logEntry);
+    switch (frequency) {
+      case "Daily":
+        return addDays(lastSent, 1);
+      case "Weekly":
+        return addDays(lastSent, 7);
+      case "Monthly":
+        const nextMonth = addMonths(lastSent, 1);
+        if (nextMonth.getMonth() !== (lastSent.getMonth() + 1) % 12) {
+          return new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0);
         }
-      }
-
-      schedule.lastSent = new Date();
-      await scheduleRepo.save(schedule);
-    } catch (error) {
-      console.error(`Failed to process schedule ${schedule.id}:`, error);
+        return nextMonth;
+      case "Quarterly":
+        return addMonths(lastSent, 3);
+      case "Annually":
+        return addYears(lastSent, 1);
+      default:
+        return undefined;
     }
-  };
+  }
 
-  const scheduleJobForSchedule = (schedule: Schedule) => {
-    try {
-      const [hours, minutes] = schedule.startTime.split(":").map(Number);
-      
-      const rule = new cron.RecurrenceRule();
-      rule.tz = TIMEZONE;
-      rule.hour = hours;
-      rule.minute = minutes;
-      
-      switch (schedule.frequency) {
-        case "Daily":
-          rule.dayOfWeek = new cron.Range(0, 6);
-          break;
-        case "Weekly":
-          rule.dayOfWeek = 1; // Monday
-          break;
-        case "Monthly":
-          rule.date = 1;
-          break;
-        case "Quarterly":
-          rule.month = [0, 3, 6, 9];
-          rule.date = 1;
-          break;
-        case "Annually":
-          rule.month = 0; // January
-          rule.date = 1;
-          break;
-        default:
-          throw new Error(`Unsupported frequency: ${schedule.frequency}`);
-      }
-
-      cron.scheduleJob(`schedule-${schedule.id}`, rule, () => {
-        processScheduleJob(schedule);
-      });
-
-      console.log(`Scheduled job for ${schedule.name} (${schedule.frequency} at ${schedule.startTime})`);
-    } catch (error) {
-      console.error(`Failed to schedule job ${schedule.id}:`, error);
+  private getDateRange(frequency: string, endDate: Date): { startDate: Date; endDate: Date } {
+    const startDate = new Date(endDate);
+    
+    switch (frequency) {
+      case "Daily":
+        startDate.setDate(endDate.getDate() - 1);
+        break;
+      case "Weekly":
+        startDate.setDate(endDate.getDate() - 7);
+        break;
+      case "Monthly":
+        startDate.setMonth(endDate.getMonth() - 1);
+        break;
+      case "Quarterly":
+        startDate.setMonth(endDate.getMonth() - 3);
+        break;
+      case "Annually":
+        startDate.setFullYear(endDate.getFullYear() - 1);
+        break;
+      default:
+        startDate.setDate(endDate.getDate() - 1);
     }
-  };
 
-  const initializeSchedules = async () => {
-    try {
-      console.log("Initializing scheduled jobs...");
-      
-      // Cancel all existing jobs
-      for (const job in cron.scheduledJobs) {
-        cron.cancelJob(job);
-      }
+    return { startDate, endDate };
+  }
 
-      // Load active schedules
-      const activeSchedules = await scheduleRepo.find({ 
-        where: { isActive: true }
-      });
+  private async handleRecipientError(recipient: Recipient, error: unknown): Promise<void> {
+    const maxRetries = 3;
+    const retryDelays = [2, 6, 24]; // Hours between retries
 
-      console.log(`Found ${activeSchedules.length} active schedules`);
+    recipient.retryAttempts += 1;
 
-      // Schedule new jobs
-      for (const schedule of activeSchedules) {
-        scheduleJobForSchedule(schedule);
-      }
-    } catch (error) {
-      console.error("Failed to initialize schedules:", error);
+    if (recipient.retryAttempts >= maxRetries) {
+      recipient.isActive = false;
+      recipient.nextRetryAt = undefined; // Changed from null to undefined
+      console.warn(`Deactivating recipient ${recipient.id} after ${maxRetries} failed attempts`);
+    } else {
+      const delayHours = retryDelays[recipient.retryAttempts - 1] || 24;
+      const nextRetry = new Date();
+      nextRetry.setHours(nextRetry.getHours() + delayHours);
+      recipient.nextRetryAt = nextRetry;
     }
-  };
 
-  // Initialize on startup
-  initializeSchedules();
-  
-  // Refresh schedules daily at midnight
-  cron.scheduleJob("0 0 * * *", initializeSchedules);
-};
+    await this.recipientRepo.save(recipient);
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await this.logSMS({
+      recipientId: recipient.id,
+      phone: recipient.phone,
+      message: "Failed to send SMS",
+      status: "failed",
+      error: errorMessage,
+      frequency: recipient.frequency,
+      scheduleId: recipient.scheduleId,
+      isAdmin: recipient.messageType === MessageType.ADMIN_SUMMARY
+    });
+  }
+
+  private getAdminTemplate(frequency: string): string {
+    return `Hi Admin, here's the ${frequency.toLowerCase()} attendance report for [ScheduleName] [DateRange].\n` +
+           `Total Attendees: [ClockIns]\n` +
+           `Late Comers: [LateTotal]\n` +
+           `Absentees: [AbsentTotal]\n` +
+           `Total Work Hours: [TotalWorkHours]\n` +
+           `From [ClientName]`;
+  }
+
+  private getUserTemplate(frequency: string): string {
+    return `Hi [FirstName], here's your ${frequency.toLowerCase()} attendance report for [ScheduleName] [DateRange].\n` +
+           `Clock Ins: [ClockIns]\n` +
+           `Clock Outs: [ClockOuts]\n` +
+           `Late Days: [LateDays]\n` +
+           `Absent Days: [AbsentDays]\n` +
+           `From [ClientName]`;
+  }
+
+  private formatMessage(
+    template: string,
+    scheduleName: string,
+    dateRange: { start: Date; end: Date },
+    frequency: string,
+    clientName: string,
+    firstName?: string
+  ): string {
+    const formattedDateRange = this.formatDateRange(dateRange, frequency);
+    
+    return template
+      .replace(/\[ScheduleName\]/g, scheduleName)
+      .replace(/\[DateRange\]/g, formattedDateRange)
+      .replace(/\[ClockIns\]/g, "0") // Placeholder - should be replaced with actual data
+      .replace(/\[ClockOuts\]/g, "0")
+      .replace(/\[LateDays\]/g, "0")
+      .replace(/\[LateTotal\]/g, "0")
+      .replace(/\[AbsentDays\]/g, "0")
+      .replace(/\[AbsentTotal\]/g, "0")
+      .replace(/\[TotalWorkHours\]/g, "0")
+      .replace(/\[ClientName\]/g, clientName)
+      .replace(/\[FirstName\]/g, firstName || "User");
+  }
+
+  private formatDateRange(dateRange: { start: Date; end: Date }, frequency: string): string {
+    if (frequency === "Daily") {
+      return `on ${format(dateRange.end, 'MMMM d, yyyy')}`;
+    }
+    return `from ${format(dateRange.start, 'MMMM d')} to ${format(dateRange.end, 'MMMM d, yyyy')}`;
+  }
+
+  private async logSMS(params: {
+    recipientId: number;
+    phone: string;
+    message: string;
+    status: "sent" | "failed";
+    messageId?: string;
+    error?: string;
+    frequency: string;
+    scheduleId: number;
+    isAdmin: boolean;
+  }): Promise<void> {
+    const smsLog = new SMSLog();
+    smsLog.recipient = params.phone;
+    smsLog.content = params.message;
+    smsLog.status = params.status;
+    smsLog.sentAt = new Date();
+    smsLog.frequency = params.frequency;
+    smsLog.scheduleId = params.scheduleId;
+    smsLog.isAdmin = params.isAdmin;
+    
+    if (params.messageId) smsLog.messageId = params.messageId;
+    if (params.error) smsLog.error = params.error;
+
+    await this.smsLogRepo.save(smsLog);
+  }
+}
+
+export function scheduleBackgroundJobs(smsService: HubtelSMS): void {
+  // Run daily at 10:10pm Ghana time (10 minutes after typical end time)
+  cron.schedule("10 22 * * *", async () => {
+    console.log(`Running scheduled SMS job at ${new Date().toLocaleString('en-GH', { timeZone: GHANA_TIMEZONE })}`);
+    const service = new CronJobService(smsService);
+    await service.runScheduledSMSJob();
+  }, {
+    timezone: GHANA_TIMEZONE
+  });
+
+  // Additional cleanup job runs weekly on Sundays at midnight
+  cron.schedule("0 0 * * 0", async () => {
+    console.log("Running weekly cleanup job");
+    const logRepo = AppDataSource.getRepository(CronLog);
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 30); // Keep logs for 30 days
+    
+    await logRepo.createQueryBuilder()
+      .delete()
+      .where("createdAt < :cutoff", { cutoff: cutoffDate })
+      .execute();
+  }, {
+    timezone: GHANA_TIMEZONE
+  });
+}

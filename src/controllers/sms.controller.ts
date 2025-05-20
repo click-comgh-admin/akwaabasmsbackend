@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { SMSLog } from "../entities/SMSLog";
-import { Recipient } from "../entities/Recipient";
+import { getRepository } from "typeorm";
+import { MessageType, Recipient } from "../entities/Recipient";
 import { HubtelSMS } from "../services/sms.service";
 import { validateSession } from "../utils/validateSession";
 
@@ -41,7 +42,7 @@ export async function sendSMS(req: Request, res: Response) {
     const results = await Promise.all(recipients.map(async (phone) => {
       const logEntry = new SMSLog();
       logEntry.recipient = phone;
-      logEntry.message = content;
+      logEntry.content = content;
       logEntry.status = 'pending';
       logEntry.sentAt = new Date();
       logEntry.frequency = frequency;
@@ -78,10 +79,10 @@ export async function sendSMS(req: Request, res: Response) {
           recipient.frequency = frequency;
           recipient.lastSent = new Date();
           recipient.scheduleId = Number(scheduleId);
-          recipient.messageType = "User Summary";
+          recipient.messageType = MessageType.USER_SUMMARY;
           recipient.clientCode = valid.session.clientCode;
           recipient.isAdmin = false;
-          await recipient.save();
+        await getRepository(SMSLog).save(logEntry);
         }
 
         logEntry.status = 'sent';

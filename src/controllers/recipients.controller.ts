@@ -1,9 +1,8 @@
 import { Request, Response } from "express";
+import { getRepository } from "typeorm";
 import { Recipient } from "../entities/Recipient";
 import { validateSession } from "../utils/validateSession";
-
-
-
+import { MessageType } from "../entities/Recipient";
 
 export async function checkRecipient(req: Request, res: Response) {
   const valid = validateSession(req, res);
@@ -19,9 +18,12 @@ export async function checkRecipient(req: Request, res: Response) {
   }
 
   try {
-    const existing = await Recipient.findOneBy({
-      phone: phone as string,
-      scheduleId: Number(scheduleId),
+    const recipientRepo = getRepository(Recipient);
+    const existing = await recipientRepo.findOne({
+      where: {
+        phone: phone as string,
+        scheduleId: Number(scheduleId),
+      }
     });
     return res.json({ exists: !!existing });
   } catch (error) {
@@ -29,15 +31,13 @@ export async function checkRecipient(req: Request, res: Response) {
     return res.status(500).json({ error: "Failed to check recipient" });
   }
 }
-// In recipients.controller.ts, add better validation
-// In recipients.controller.ts
+
 export async function deleteRecipientByPhone(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
 
   const { phone, scheduleId } = req.query;
 
-  // Enhanced validation
   if (!phone || typeof phone !== 'string' || !/^\+?\d{10,15}$/.test(phone)) {
     return res.status(400).json({
       error: "Invalid phone number format (10-15 digits, + optional)"
@@ -51,7 +51,8 @@ export async function deleteRecipientByPhone(req: Request, res: Response) {
   }
 
   try {
-    const result = await Recipient.delete({
+    const recipientRepo = getRepository(Recipient);
+    const result = await recipientRepo.delete({
       phone: phone,
       scheduleId: Number(scheduleId)
     });
@@ -74,6 +75,7 @@ export async function deleteRecipientByPhone(req: Request, res: Response) {
     });
   }
 }
+
 export async function deleteRecipientById(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
@@ -84,12 +86,16 @@ export async function deleteRecipientById(req: Request, res: Response) {
   }
 
   try {
-    const recipient = await Recipient.findOneBy({ id });
+    const recipientRepo = getRepository(Recipient);
+    const recipient = await recipientRepo.findOne({
+      where: { id }
+    });
+    
     if (!recipient) {
       return res.status(404).json({ error: "Recipient not found" });
     }
 
-    await recipient.remove();
+    await recipientRepo.remove(recipient);
     return res.json({ success: true });
   } catch (error) {
     console.error("Failed to delete recipient:", error);
@@ -110,12 +116,13 @@ export async function deleteRecipients(req: Request, res: Response) {
   }
 
   try {
+    const recipientRepo = getRepository(Recipient);
     const query =
       type === "admin"
-        ? { messageType: "Admin Summary" }
-        : { messageType: "User Summary" };
+        ? { messageType: MessageType.ADMIN_SUMMARY }
+        : { messageType: MessageType.USER_SUMMARY };
 
-    await Recipient.delete(query);
+    await recipientRepo.delete(query);
     return res.json({ success: true });
   } catch (error) {
     console.error("Failed to delete recipients:", error);
@@ -131,7 +138,8 @@ export async function listRecipients(req: Request, res: Response) {
   const { phone, scheduleId, frequency, messageType } = req.query;
 
   try {
-    const queryBuilder = Recipient.createQueryBuilder("recipient")
+    const recipientRepo = getRepository(Recipient);
+    const queryBuilder = recipientRepo.createQueryBuilder("recipient")
       .leftJoinAndSelect("recipient.schedule", "schedule")
       .where("recipient.clientCode = :clientCode", {
         clientCode: session.clientCode,
@@ -163,7 +171,7 @@ export async function listRecipients(req: Request, res: Response) {
 
     return res.json({
       success: true,
-      data: recipients.map((r) => ({
+      data: recipients.map((r: Recipient) => ({
         id: r.id,
         phone: r.phone,
         frequency: r.frequency,

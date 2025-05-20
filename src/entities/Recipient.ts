@@ -1,35 +1,62 @@
-import { BaseEntity, Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
-import { Schedule } from './Schedule';
+// entities/Recipient.ts
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, BaseEntity } from "typeorm";
+import { Schedule } from "./Schedule";
 
-@Entity()
+export enum MessageType {
+  ADMIN_SUMMARY = "Admin Summary",
+  USER_SUMMARY = "User Summary",
+}
+
+@Entity("recipients")
 export class Recipient extends BaseEntity {
-  @PrimaryGeneratedColumn()
+  @PrimaryGeneratedColumn({ name: "id" })
   id!: number;
 
-  @Column()
+  @Column({ name: "phone" })
   phone!: string;
 
-  @Column()
-  frequency!: string;
-
-  @Column({ name: 'lastSent', type: 'timestamp' })
-  lastSent!: Date;
-
-  @Column({ name: 'scheduleId' })
+  @Column({ name: "schedule_id" })
   scheduleId!: number;
 
-  @ManyToOne(() => Schedule, schedule => schedule.recipients)
+  @ManyToOne(() => Schedule, (schedule) => schedule.recipients)
   schedule!: Schedule;
 
-  @Column({ name: 'messagetype' })
-  messageType!: string;
+  @Column({ name: "frequency" })
+  frequency!: string;
 
-  @Column({ name: 'clientcode' })
+  @Column({ name: "start_date", type: "date", nullable: true })
+  startDate?: Date;
+
+  @Column({ name: "last_sent", type: "timestamp", nullable: true })
+  lastSent?: Date;
+
+  @Column({ name: "next_send_date", type: 'timestamp' })
+  nextSendDate!: Date; 
+
+  @Column({ name: "message_type", type: "enum", enum: MessageType })
+  messageType!: MessageType;
+
+  @Column({ name: "org_id", nullable: true })
+  orgId?: string;
+
+  @Column({ name: "client_code" })
   clientCode!: string;
 
-  @Column({ name: 'isadmin', default: false })
+  @Column({ name: "is_admin", default: false })
   isAdmin!: boolean;
 
-  @Column({ name: 'createdat', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({ name: "created_at" })
   createdAt!: Date;
+
+  @UpdateDateColumn({ name: "updated_at" })
+  updatedAt!: Date;
+
+  @Column({ name: "retry_attempts", default: 0 })
+  retryAttempts!: number;
+
+  @Column({ name: "next_retry_at", nullable: true, type: 'timestamp' })
+  nextRetryAt?: Date;
+
+  @Column({ name: "is_active", default: false })
+  isActive!: boolean;
 }

@@ -1,31 +1,52 @@
-import { BaseEntity, Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+// entities/SMSLog.ts
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, BaseEntity } from "typeorm";
 
-@Entity({ name: 'sms_log' })
+@Entity("sms_logs")
 export class SMSLog extends BaseEntity {
-  @PrimaryGeneratedColumn()
+  @PrimaryGeneratedColumn({ name: "id" })
   id!: number;
 
-  @Column()
+  @Column({ name: "recipient" })
   recipient!: string;
 
-  @Column('text')
-  message!: string;
+  @Column("text", { name: "content" })
+  content!: string;
 
-  @Column()
-  status!: string; // 'pending' | 'sent' | 'failed'
+  @Column({ 
+    type: "enum", 
+    enum: ["pending", "sent", "failed"],
+    default: "pending",
+    name: "status"
+  })
+  status!: "pending" | "sent" | "failed";
 
-  @Column({ name: 'sentAt', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ type: "timestamp", name: "sentat" })
   sentAt!: Date;
 
-  @Column({ nullable: true })
-  frequency?: string;
+  @Column({ name: "frequency" })
+  frequency!: string;
 
-  @Column({ nullable: true })
+  @Column({ name: "scheduleid" })
+  scheduleId!: number;
+
+  @Column({ name: "isadmin" })
+  isAdmin!: boolean;
+
+  @Column({ nullable: true, name: "templatename" })
+  templateName?: string;
+
+  @Column({ type: "int", default: 0, name: "retrycount" })
+  retryCount!: number;
+
+  @Column({ type: "text", nullable: true, name: "error" })
   error?: string;
 
-  @Column({ name: 'messageid', nullable: true })
+  @Column({ nullable: true, name: "messageid" })
   messageId?: string;
 
-  @Column({ type: 'json', nullable: true })
+  @Column({ type: "json", nullable: true, name: "response" })
   response?: any;
+
+  @CreateDateColumn({ name: "createdat" })
+  createdAt!: Date;
 }

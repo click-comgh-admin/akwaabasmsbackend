@@ -61,7 +61,7 @@ const initializeDatabase = async (attempt = 1): Promise<void> => {
     // Start server after everything is ready
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
-      scheduleBackgroundJobs(smsService, attendanceService);
+      scheduleBackgroundJobs(smsService);
     });
 
     process.on("SIGINT", () => shutdown(server));
