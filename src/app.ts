@@ -79,12 +79,10 @@ async function initializeDatabase(attempt = 1): Promise<void> {
     
     if (!AppDataSource.isInitialized) {
       await AppDataSource.initialize();
+      // Verify connection with a simple query
+      await AppDataSource.query("SELECT 1");
+      console.log("✅ Database connected and verified");
     }
-    
-    // Test the connection
-    await AppDataSource.query("SELECT 1");
-    
-    console.log("✅ Database connected successfully");
 
     if (process.env.RUN_MIGRATIONS === "true") {
       console.log("⚙️ Running migrations...");
@@ -92,14 +90,20 @@ async function initializeDatabase(attempt = 1): Promise<void> {
       console.log("✅ Migrations completed");
     }
   } catch (error) {
-    console.error(`Connection failed (Attempt ${attempt}):`, error);
-    
+    let errorMessage = "Unknown error";
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+    console.error(`❌ Connection failed (Attempt ${attempt}):`, errorMessage);
+
     if (attempt < MAX_RETRIES) {
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      const delay = RETRY_DELAY * attempt; // Exponential backoff
+      console.log(`Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
       return initializeDatabase(attempt + 1);
     }
-    
-    throw error;
+
+    throw new Error(`Failed to connect after ${MAX_RETRIES} attempts. Last error: ${errorMessage}`);
   }
 }
 
