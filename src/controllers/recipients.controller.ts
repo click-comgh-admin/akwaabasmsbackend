@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { getRepository } from "typeorm";
+import { AppDataSource } from "../config/data-source";
 import { Recipient } from "../entities/Recipient";
 import { validateSession } from "../utils/validateSession";
 import { MessageType } from "../entities/Recipient";
@@ -18,7 +19,7 @@ export async function checkRecipient(req: Request, res: Response) {
   }
 
   try {
-    const recipientRepo = getRepository(Recipient);
+const recipientRepo = AppDataSource.getRepository(Recipient);
     const existing = await recipientRepo.findOne({
       where: {
         phone: phone as string,
