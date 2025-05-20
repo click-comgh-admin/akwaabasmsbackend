@@ -39,17 +39,19 @@ export class Recipient extends BaseEntity {
   @Column({ name: "org_id", nullable: true })
   orgId?: string;
 
-  @Column({ name: "client_code" })
-  clientCode!: string;
+@Column({ name: 'clientcode', nullable: true })
+clientCode?: string;
+
 
   @Column({ name: "is_admin", default: false })
   isAdmin!: boolean;
 
-  @CreateDateColumn({ name: "created_at" })
-  createdAt!: Date;
 
-  @UpdateDateColumn({ name: "updated_at" })
-  updatedAt!: Date;
+@CreateDateColumn({ name: 'createdat' })
+createdAt!: Date;
+
+@UpdateDateColumn({ name: 'updatedat' })
+updatedAt!: Date;
 
   @Column({ name: "retry_attempts", default: 0 })
   retryAttempts!: number;

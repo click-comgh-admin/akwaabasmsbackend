@@ -1,23 +1,23 @@
 // entities/CronLog.ts
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from "typeorm";
 
-@Entity()
+@Entity({ name: 'cron_log' })  // Explicit table name
 export class CronLog {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column()
-  jobType!: string; // e.g., "SMS_DELIVERY"
+  @Column({ name: 'jobtype' })  // Match exact column name
+  jobType!: string;
 
   @Column()
-  status!: "started" | "completed" | "failed";
+  status!: 'started' | 'completed' | 'failed';
 
-  @Column({ type: "text", nullable: true })
-  details!: string;
+  @Column({ type: 'text', nullable: true })
+  details?: string;
 
-  @Column({ type: "int", default: 0 })
+  @Column({ name: 'processedcount', default: 0 })
   processedCount!: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'createdat' })
   createdAt!: Date;
 }
