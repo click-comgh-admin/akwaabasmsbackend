@@ -139,7 +139,11 @@ export async function listRecipients(req: Request, res: Response) {
   const { phone, scheduleId, frequency, messageType } = req.query;
 
   try {
-    const recipientRepo = getRepository(Recipient);
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const recipientRepo = AppDataSource.getRepository(Recipient);
     const queryBuilder = recipientRepo.createQueryBuilder("recipient")
       .leftJoinAndSelect("recipient.schedule", "schedule")
       .where("recipient.clientCode = :clientCode", {
