@@ -1,5 +1,5 @@
 // entities/Recipient.ts
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, BaseEntity } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column,JoinColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, BaseEntity } from "typeorm";
 import { Schedule } from "./Schedule";
 
 export enum MessageType {
@@ -18,8 +18,10 @@ export class Recipient extends BaseEntity {
   @Column({ name: "scheduleid" })
   scheduleId!: number;
 
-  @ManyToOne(() => Schedule, (schedule) => schedule.recipients)
-  schedule!: Schedule;
+@ManyToOne(() => Schedule, (schedule) => schedule.recipients)
+@JoinColumn({ name: "scheduleid" })
+schedule!: Schedule;
+
 
   @Column({ name: "frequency" })
   frequency!: string;
