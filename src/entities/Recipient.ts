@@ -15,7 +15,7 @@ export class Recipient extends BaseEntity {
   @Column({ name: "phone" })
   phone!: string;
 
-  @Column({ name: "schedule_id" })
+  @Column({ name: "scheduleid" })
   scheduleId!: number;
 
   @ManyToOne(() => Schedule, (schedule) => schedule.recipients)
