@@ -19,7 +19,7 @@ export async function checkRecipient(req: Request, res: Response) {
   }
 
   try {
-const recipientRepo = AppDataSource.getRepository(Recipient);
+    const recipientRepo = AppDataSource.getRepository(Recipient);
     const existing = await recipientRepo.findOne({
       where: {
         phone: phone as string,
@@ -57,14 +57,14 @@ export async function deleteRecipientByPhone(req: Request, res: Response) {
       phone: phone,
       scheduleId: Number(scheduleId)
     });
-    
+
     if (result.affected === 0) {
       return res.status(404).json({
         success: false,
         error: "No recipient found with that phone and scheduleId"
       });
     }
-    
+
     return res.json({
       success: true,
       deletedCount: result.affected
@@ -91,7 +91,7 @@ export async function deleteRecipientById(req: Request, res: Response) {
     const recipient = await recipientRepo.findOne({
       where: { id }
     });
-    
+
     if (!recipient) {
       return res.status(404).json({ error: "Recipient not found" });
     }
@@ -155,7 +155,7 @@ export async function listRecipients(req: Request, res: Response) {
     }
 
     if (scheduleId && !isNaN(Number(scheduleId))) {
-      queryBuilder.andWhere("recipient.scheduleId = :scheduleId", {
+      queryBuilder.andWhere("recipient.scheduleid = :scheduleId", {
         scheduleId: Number(scheduleId),
       });
     }
