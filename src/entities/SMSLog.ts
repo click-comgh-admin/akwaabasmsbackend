@@ -12,8 +12,8 @@ export class SMSLog extends BaseEntity {
   @Column("text", { name: "content" })
   content!: string;
 
-  @Column({ 
-    type: "enum", 
+  @Column({
+    type: "enum",
     enum: ["pending", "sent", "failed"],
     default: "pending",
     name: "status"
@@ -25,6 +25,9 @@ export class SMSLog extends BaseEntity {
 
   @Column({ name: "frequency" })
   frequency!: string;
+
+  @Column({ name: "clientcode", length: 50 })
+  clientCode!: string;
 
   @Column({ name: "scheduleid" })
   scheduleId!: number;
