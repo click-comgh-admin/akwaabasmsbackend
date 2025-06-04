@@ -12,6 +12,14 @@ import {
   listRecipients,
   deleteRecipientByPhone,
 } from "../controllers/recipients.controller";
+import { 
+  getContact, 
+  saveContact 
+} from "../controllers/contact.controller";
+import { 
+  getAdminContacts, 
+  addAdminContact 
+} from "../controllers/admin-contact.controller";
 import { getAvailableSchedules, getScheduleDetails, getUsersPerSchedule } from "../controllers/schedule.controller";
 import { getSMSLogs, sendSMS } from "../controllers/sms.controller";
 import { forwardRequest } from "../controllers/forwarder.controller";
@@ -65,7 +73,29 @@ router.delete("/recipients", deleteRecipients);
 router.get("/recipients/list", listRecipients);
 router.delete("/recipients/by-phone", deleteRecipientByPhone);
 
+//
+// 📞 CONTACT ROUTES
+//
 
+// @route   GET /api/contact
+// @desc    Get primary and secondary contacts for the client
+router.get("/contact", getContact);
+
+// @route   POST /api/contact
+// @desc    Save or update client contacts
+router.post("/contact", saveContact);
+
+//
+// 👥 ADMIN CONTACT ROUTES
+//
+
+// @route   GET /api/admin-contact
+// @desc    Get all admin contacts for the client
+router.get("/admin-contact", getAdminContacts);
+
+// @route   POST /api/admin-contact
+// @desc    Add a new admin contact
+router.post("/admin-contact", addAdminContact);
 //
 // 📅 SCHEDULE ROUTES
 //
