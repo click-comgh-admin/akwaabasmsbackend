@@ -1,7 +1,4 @@
 import { DataSource } from "typeorm";
-import { Schedule } from "../entities/Schedule";
-import { SMSLog } from "../entities/SMSLog";
-import { Recipient } from "../entities/Recipient";
 import * as dotenv from "dotenv";
 import * as fs from "fs";
 

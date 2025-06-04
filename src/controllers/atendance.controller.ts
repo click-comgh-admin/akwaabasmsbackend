@@ -123,7 +123,35 @@ function calculateAdminStats(records: AttendanceRecord[], schedule: Schedule) {
     ...workMetrics
   };
 }
+// In attendance.controller.ts
+export async function getUserCounts(req: Request, res: Response) {
+  const valid = validateSession(req, res);
+  if (!valid) return;
 
+  const { scheduleId } = req.query;
+  if (!scheduleId) {
+    return res.status(400).json({ error: "Schedule ID is required" });
+  }
+
+  try {
+    const baseURL = process.env.ATTENDANCE_API_URL;
+    if (!baseURL) throw new Error("Attendance API URL not configured");
+
+    const response = await axios.get(`${baseURL}/attendance/meeting-event/users-count`, {
+      params: { meetingEventId: scheduleId },
+      headers: { Authorization: `Token ${valid.session.rawToken}` }
+    });
+
+    res.json({
+      total: response.data.total || 0,
+      males: response.data.males || 0,
+      females: response.data.females || 0
+    });
+  } catch (error) {
+    console.error("Failed to fetch user counts:", error);
+    res.status(500).json({ error: "Failed to fetch user counts" });
+  }
+}
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
   const stats = {
     clockIns: 0,

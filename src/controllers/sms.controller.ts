@@ -1,9 +1,10 @@
 import { Request, Response } from "express";
 import { SMSLog } from "../entities/SMSLog";
-import { getRepository } from "typeorm";
 import { MessageType, Recipient } from "../entities/Recipient";
 import { HubtelSMS } from "../services/sms.service";
 import { validateSession } from "../utils/validateSession";
+import { getRepository } from "typeorm";
+import axios from "axios";
 
 interface HubtelResponse {
   Status: string;
@@ -12,16 +13,48 @@ interface HubtelResponse {
   NetworkId?: string;
 }
 
+interface HubtelSMSParams {
+  from: string;
+  to: string;
+  content: string;
+  partIndicator?: string;
+}
+
+interface SMSRequest {
+  from: string;
+  to: string | string[];
+  content: string;
+  frequency: string;
+  scheduleId?: number;
+  isAdmin: boolean;
+  clientCode?: string;
+  orgName?: string;
+}
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+const MAX_SMS_LENGTH = 160;
+const MAX_SENDER_LENGTH = 11;
+const MAX_RECIPIENTS_PER_BATCH = 100;
+
 export async function sendSMS(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
 
   const { from, to, content, frequency, scheduleId, isAdmin } = req.body;
+  const { clientCode, organizationName } = valid.session;
 
   if (!from || !content || !frequency) {
     return res.status(400).json({
       success: false,
-      error: "Missing required fields (from, content, frequency)",
+      error: "Missing required fields: from, content, frequency"
+    });
+  }
+
+  if (from.length > MAX_SENDER_LENGTH) {
+    return res.status(400).json({
+      success: false,
+      error: `Sender name exceeds ${MAX_SENDER_LENGTH} characters`
     });
   }
 
@@ -29,7 +62,14 @@ export async function sendSMS(req: Request, res: Response) {
   if (recipients.length === 0) {
     return res.status(400).json({
       success: false,
-      error: "At least one recipient is required",
+      error: "At least one recipient is required"
+    });
+  }
+
+  if (recipients.length > MAX_RECIPIENTS_PER_BATCH) {
+    return res.status(400).json({
+      success: false,
+      error: `Maximum ${MAX_RECIPIENTS_PER_BATCH} recipients per request`
     });
   }
 
@@ -39,83 +79,20 @@ export async function sendSMS(req: Request, res: Response) {
       process.env.HUBTEL_CLIENT_SECRET!
     );
 
-    const results = await Promise.all(recipients.map(async (phone) => {
-      const logEntry = new SMSLog();
-      logEntry.recipient = phone;
-      logEntry.content = content;
-      logEntry.status = 'pending';
-      logEntry.sentAt = new Date();
-      logEntry.frequency = frequency;
+    const results = await processRecipientsBatch(
+      recipients,
+      smsService,
+      { from, content, frequency, scheduleId, isAdmin, clientCode, organizationName }
+    );
 
-      try {
-        const formattedPhone = formatPhoneNumber(phone);
-        if (!formattedPhone) {
-          throw new Error("Invalid phone number format");
-        }
-
-        if (!isAdmin) {
-          const existing = await Recipient.findOneBy({
-            phone: formattedPhone,
-            scheduleId: Number(scheduleId),
-          });
-          if (existing) {
-            throw new Error("Recipient already exists for this schedule");
-          }
-        }
-
-        const hubtelResponse = await smsService.sendSMS({ 
-          from, 
-          to: formattedPhone, 
-          content 
-        }) as HubtelResponse;
-
-        if (!hubtelResponse || hubtelResponse.Status !== "0") {
-          throw new Error(hubtelResponse?.Message || "SMS gateway error");
-        }
-
-        if (!isAdmin) {
-          const recipient = new Recipient();
-          recipient.phone = formattedPhone;
-          recipient.frequency = frequency;
-          recipient.lastSent = new Date();
-          recipient.scheduleId = Number(scheduleId);
-          recipient.messageType = MessageType.USER_SUMMARY;
-          recipient.clientCode = valid.session.clientCode;
-          recipient.isAdmin = false;
-        await getRepository(SMSLog).save(logEntry);
-        }
-
-        logEntry.status = 'sent';
-        logEntry.messageId = hubtelResponse.MessageId;
-        logEntry.response = hubtelResponse;
-        await logEntry.save();
-
-        return { 
-          phone: formattedPhone, 
-          success: true,
-          messageId: hubtelResponse.MessageId
-        };
-      } catch (error) {
-        const errorMsg = (error as Error).message;
-        logEntry.status = 'failed';
-        logEntry.error = errorMsg.substring(0, 255);
-        await logEntry.save();
-
-        return {
-          phone,
-          success: false,
-          error: errorMsg
-        };
-      }
-    }));
-
-    const successfulSends = results.filter(r => r.success).length;
     return res.json({
       success: true,
       total: recipients.length,
-      successful: successfulSends,
-      failed: recipients.length - successfulSends,
+      successful: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
       results,
+      clientCode,
+      orgName: organizationName
     });
 
   } catch (error) {
@@ -128,19 +105,142 @@ export async function sendSMS(req: Request, res: Response) {
     });
   }
 }
+
+async function processRecipientsBatch(
+  recipients: string[],
+  smsService: HubtelSMS,
+  params: {
+    from: string;
+    content: string;
+    frequency: string;
+    scheduleId?: number;
+    isAdmin: boolean;
+    clientCode: string;
+    organizationName: string;
+  }
+) {
+  return Promise.all(recipients.map(async (phone) => {
+    const logEntry = new SMSLog();
+    logEntry.recipient = phone;
+    logEntry.content = params.content;
+    logEntry.status = 'pending';
+    logEntry.sentAt = new Date();
+    logEntry.frequency = params.frequency;
+    logEntry.scheduleId = params.scheduleId || 0;
+    logEntry.isAdmin = params.isAdmin;
+   if ('clientCode' in logEntry) {
+      logEntry.clientCode = params.clientCode;
+    }
+
+    try {
+      const formattedPhone = formatPhoneNumber(phone);
+      if (!formattedPhone) {
+        throw new Error("Invalid phone number format");
+      }
+
+      if (!params.isAdmin) {
+        const existing = await Recipient.findOneBy({
+          phone: formattedPhone,
+          scheduleId: Number(params.scheduleId),
+        });
+        if (existing) {
+          throw new Error("Recipient already exists for this schedule");
+        }
+      }
+
+      const messageParts = splitMessage(params.content);
+      let allPartsSent = true;
+      let messageId = '';
+
+      for (const [index, part] of messageParts.entries()) {
+        const smsParams: HubtelSMSParams = {
+          from: params.from,
+          to: formattedPhone,
+          content: part
+        };
+
+        if (messageParts.length > 1) {
+          smsParams.partIndicator = `${index+1}/${messageParts.length}`;
+        }
+
+        const hubtelResponse = await smsService.sendSMS(smsParams) as HubtelResponse;
+
+        if (!hubtelResponse || hubtelResponse.Status !== "0") {
+          allPartsSent = false;
+          throw new Error(hubtelResponse?.Message || "SMS gateway error");
+        }
+
+        if (index === 0) {
+          messageId = hubtelResponse.MessageId;
+        }
+      }
+
+      if (!params.isAdmin) {
+        await createRecipient(
+          formattedPhone,
+          params.frequency,
+          params.scheduleId,
+          params.clientCode
+        );
+      }
+
+      logEntry.status = 'sent';
+      logEntry.messageId = messageId;
+      await logEntry.save();
+
+      return { 
+        phone: formattedPhone, 
+        success: true,
+        parts: messageParts.length
+      };
+    } catch (error) {
+      logEntry.status = 'failed';
+      logEntry.error = (error as Error).message.substring(0, 255);
+      await logEntry.save();
+
+      return {
+        phone,
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }));
+}
+
+async function createRecipient(
+  phone: string,
+  frequency: string,
+  scheduleId?: number,
+  clientCode?: string
+) {
+  const recipient = new Recipient();
+  recipient.phone = phone;
+  recipient.frequency = frequency;
+  recipient.lastSent = new Date();
+  recipient.scheduleId = Number(scheduleId);
+  recipient.messageType = MessageType.USER_SUMMARY;
+  recipient.clientCode = clientCode;
+  recipient.isAdmin = false;
+  await recipient.save();
+}
+
 export const getSMSLogs = async (req: Request, res: Response) => {
   const valid = validateSession(req, res);
   if (!valid) return;
 
-  const { limit = 100, status, phone } = req.query;
+  const { limit = 100, status, phone, startDate, endDate } = req.query;
+  const { clientCode } = valid.session;
 
   try {
     const queryBuilder = SMSLog.createQueryBuilder('log')
+      .where('log.clientCode = :clientCode', { clientCode })
       .orderBy('log.sentAt', 'DESC')
-      .take(Number(limit));
+      .take(Math.min(Number(limit), 500));
 
     if (status) queryBuilder.andWhere('log.status = :status', { status });
     if (phone) queryBuilder.andWhere('log.recipient LIKE :phone', { phone: `%${phone}%` });
+    if (startDate) queryBuilder.andWhere('log.sentAt >= :startDate', { startDate });
+    if (endDate) queryBuilder.andWhere('log.sentAt <= :endDate', { endDate });
 
     const logs = await queryBuilder.getMany();
     return res.json({
@@ -149,14 +249,35 @@ export const getSMSLogs = async (req: Request, res: Response) => {
       data: logs,
     });
   } catch (error) {
-    const err = error as Error;
     return res.status(500).json({
       success: false,
       error: "Failed to fetch logs",
-      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+      details: process.env.NODE_ENV === "development" 
+        ? (error as Error).message 
+        : undefined,
     });
   }
 };
+
+function splitMessage(text: string): string[] {
+  if (text.length <= MAX_SMS_LENGTH) return [text];
+
+  const naturalBreaks = text.split(/(?<=[.!?])\s+|(?<=\n)/);
+  const parts: string[] = [];
+  let currentPart = "";
+
+  for (const segment of naturalBreaks) {
+    if (currentPart.length + segment.length + 1 <= MAX_SMS_LENGTH) {
+      currentPart += (currentPart ? " " : "") + segment;
+    } else {
+      if (currentPart) parts.push(currentPart);
+      currentPart = segment.substring(0, MAX_SMS_LENGTH);
+    }
+  }
+
+  if (currentPart) parts.push(currentPart);
+  return parts;
+}
 
 function formatPhoneNumber(phone: string): string | null {
   if (!phone) return null;

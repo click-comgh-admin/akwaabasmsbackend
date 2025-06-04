@@ -4,7 +4,7 @@ import {
   getSession,
   logout,
 } from "../controllers/auth.controller";
-import { getAttendanceStats } from "../controllers/atendance.controller";
+import { getAttendanceStats, getUserCounts } from "../controllers/atendance.controller";
 import {
   checkRecipient,
   deleteRecipientById,
@@ -41,6 +41,8 @@ router.post("/auth/logout", logout);
 // @route   GET /api/attendance/stats
 // @desc    Retrieves attendance stats (clock-ins, lateness, overtime, etc.)
 router.get("/attendance/stats", getAttendanceStats);
+router.get("/attendance/users-count", getUserCounts);
+
 
 //
 // 📦 RECIPIENT ROUTES
