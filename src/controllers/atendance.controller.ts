@@ -127,6 +127,9 @@ function calculateAdminStats(records: AttendanceRecord[], schedule: Schedule) {
     ...workMetrics
   };
 }
+
+
+
 export async function getUserCounts(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
@@ -144,7 +147,7 @@ export async function getUserCounts(req: Request, res: Response) {
     const response = await axios.get(`${baseURL}/attendance/meeting-event/attendance`, {
       params: { 
         meetingEventId: scheduleId,
-        length: 1000 // Get enough records to count all users
+        length: 1000
       },
       headers: { Authorization: `Token ${valid.session.rawToken}` }
     });
@@ -152,15 +155,18 @@ export async function getUserCounts(req: Request, res: Response) {
     const records = response.data?.results || [];
     
     // Count unique users and genders
-    const userMap = new Map<number, { gender?: string }>();
+    const userMap = new Map<string, { gender?: string }>();
     
     records.forEach((record: AttendanceRecord) => {
       if (record.memberId?.phone) {
-        const userId = record.memberId.id; // Assuming memberId has an id property
-        if (typeof userId === "number" && !userMap.has(userId)) {
-          userMap.set(userId, {
-            gender: record.memberId.gender?.toLowerCase() || 'unknown'
-          });
+        const userId = record.memberId.id?.toString() || record.memberId.phone;
+        if (!userMap.has(userId)) {
+          // Safely handle gender (might be null/undefined/not a string)
+          const gender = typeof record.memberId.gender === 'string' 
+            ? record.memberId.gender.toLowerCase() 
+            : 'unknown';
+            
+          userMap.set(userId, { gender });
         }
       }
     });
@@ -184,11 +190,14 @@ export async function getUserCounts(req: Request, res: Response) {
       success: false,
       error: "Failed to fetch user counts",
       details: process.env.NODE_ENV === "development" 
-        ? (error instanceof Error ? error.message : String(error))
+        ? error instanceof Error ? error.message : String(error)
         : undefined
     });
   }
 }
+
+
+
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
   const stats = {
     clockIns: 0,

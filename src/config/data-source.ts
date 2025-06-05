@@ -1,6 +1,10 @@
 import { DataSource } from "typeorm";
 import * as dotenv from "dotenv";
 import * as fs from "fs";
+import { CronLog } from "../entities/CronLog";
+import { Schedule } from "../entities/Schedule";
+import { Recipient } from "../entities/Recipient";
+import { SMSLog } from "../entities/SMSLog";
 
 dotenv.config();
 
@@ -14,9 +18,7 @@ console.table({
 });
 
 // Read the CA certificate file
-const caCert = fs.readFileSync("ca-certificate.crt"); // Adjust the path to your CA certificate file
-
-
+const caCert = fs.readFileSync("ca-certificate.crt");
 
 export const AppDataSource = new DataSource({
   type: "postgres",
@@ -31,11 +33,15 @@ export const AppDataSource = new DataSource({
         ca: caCert,
       }
     : undefined,
-    entities: [
-      "dist/entities/**/*.js", // Point to compiled JavaScript entities
-    ],
-    migrations: [
-      "dist/migrations/**/*.js", // Point to compiled JavaScript migrations
-    ],
+  entities: [
+    Schedule,
+    Recipient,
+    SMSLog,
+    CronLog
+  ],
+  migrations: [
+    "dist/migrations/**/*.js",
+  ],
   synchronize: false,
+  logging: true, // Enable logging to debug
 });
