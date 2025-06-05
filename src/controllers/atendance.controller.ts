@@ -1,5 +1,6 @@
+//attendance.controller.ts
 import { Request, Response } from "express";
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 import { validateSession } from "../utils/validateSession";
 
 interface AttendanceRecord {
@@ -7,8 +8,11 @@ interface AttendanceRecord {
   outTime?: string;
   date: string;
   memberId?: {
+    id?: number;
     phone?: string;
     firstname?: string;
+    surname?: string;
+    gender?: string;
   };
   meetingEventId?: {
     latenessTime?: string;
@@ -123,7 +127,6 @@ function calculateAdminStats(records: AttendanceRecord[], schedule: Schedule) {
     ...workMetrics
   };
 }
-// In attendance.controller.ts
 export async function getUserCounts(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
@@ -137,19 +140,53 @@ export async function getUserCounts(req: Request, res: Response) {
     const baseURL = process.env.ATTENDANCE_API_URL;
     if (!baseURL) throw new Error("Attendance API URL not configured");
 
-    const response = await axios.get(`${baseURL}/attendance/meeting-event/users-count`, {
-      params: { meetingEventId: scheduleId },
+    // Get attendance records for the schedule
+    const response = await axios.get(`${baseURL}/attendance/meeting-event/attendance`, {
+      params: { 
+        meetingEventId: scheduleId,
+        length: 1000 // Get enough records to count all users
+      },
       headers: { Authorization: `Token ${valid.session.rawToken}` }
     });
 
-    res.json({
-      total: response.data.total || 0,
-      males: response.data.males || 0,
-      females: response.data.females || 0
+    const records = response.data?.results || [];
+    
+    // Count unique users and genders
+    const userMap = new Map<number, { gender?: string }>();
+    
+    records.forEach((record: AttendanceRecord) => {
+      if (record.memberId?.phone) {
+        const userId = record.memberId.id; // Assuming memberId has an id property
+        if (typeof userId === "number" && !userMap.has(userId)) {
+          userMap.set(userId, {
+            gender: record.memberId.gender?.toLowerCase() || 'unknown'
+          });
+        }
+      }
     });
+
+    // Calculate counts
+    const total = userMap.size;
+    const males = Array.from(userMap.values()).filter(u => u.gender === 'male').length;
+    const females = Array.from(userMap.values()).filter(u => u.gender === 'female').length;
+
+    return res.json({
+      success: true,
+      total,
+      males,
+      females,
+      unknown: total - males - females
+    });
+
   } catch (error) {
     console.error("Failed to fetch user counts:", error);
-    res.status(500).json({ error: "Failed to fetch user counts" });
+    return res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch user counts",
+      details: process.env.NODE_ENV === "development" 
+        ? (error instanceof Error ? error.message : String(error))
+        : undefined
+    });
   }
 }
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
