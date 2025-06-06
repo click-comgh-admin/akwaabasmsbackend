@@ -146,39 +146,40 @@ export async function getUserCounts(req: Request, res: Response) {
     const response = await axios.get(`${baseURL}/attendance/meeting-event/attendance`, {
       params: { 
         meetingEventId: scheduleId,
-        length: 1000 // Get enough records to count all users
+        length: 1000
       },
       headers: { Authorization: `Token ${valid.session.rawToken}` }
     });
 
     const records = response.data?.results || [];
     
-    // Create a map to count unique users and their genders
-    const userGenderMap = new Map<number, string>();
-    
+    // Initialize counters
+    let total = 0;
+    let males = 0;
+    let females = 0;
+    const countedUserIds = new Set<number>();
+
     records.forEach((record: AttendanceRecord) => {
-      if (record.memberId?.id) {
-        // Only count each user once
-        if (!userGenderMap.has(record.memberId.id)) {
-          // Default to 'unknown' if gender not specified
-          const gender = record.memberId.gender?.toLowerCase() || 'unknown';
-          userGenderMap.set(record.memberId.id, gender);
+      if (record.memberId?.id && !countedUserIds.has(record.memberId.id)) {
+        countedUserIds.add(record.memberId.id);
+        total++;
+
+        // Safely handle gender (might be null/undefined/not a string)
+        const gender = record.memberId.gender;
+        if (typeof gender === 'string') {
+          const normalizedGender = gender.toLowerCase().trim();
+          if (normalizedGender === 'male') males++;
+          else if (normalizedGender === 'female') females++;
         }
       }
     });
-
-    // Calculate counts
-    const total = userGenderMap.size;
-    const males = Array.from(userGenderMap.values()).filter(g => g === 'male').length;
-    const females = Array.from(userGenderMap.values()).filter(g => g === 'female').length;
-    const unknown = total - males - females;
 
     return res.json({
       success: true,
       total,
       males,
       females,
-      unknown
+      unknown: total - males - females
     });
 
   } catch (error) {
@@ -192,7 +193,6 @@ export async function getUserCounts(req: Request, res: Response) {
     });
   }
 }
-
 
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
   const stats = {
