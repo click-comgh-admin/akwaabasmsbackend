@@ -141,7 +141,6 @@ export async function getUserCounts(req: Request, res: Response) {
     const baseURL = process.env.ATTENDANCE_API_URL;
     if (!baseURL) throw new Error("Attendance API URL not configured");
 
-    // Get attendance records for the schedule
     const response = await axios.get(`${baseURL}/attendance/meeting-event/attendance`, {
       params: { 
         meetingEventId: scheduleId,
@@ -151,31 +150,34 @@ export async function getUserCounts(req: Request, res: Response) {
     });
 
     const records = response.data?.results || [];
-    
-    // Create a map to track unique users and their genders
-    const userMap = new Map<number, 'male' | 'female' | 'unknown'>(); // Using user ID as key
-    
-    records.forEach((record: AttendanceRecord) => {
-      if (record.memberId?.id) {
-        // Only process if we haven't seen this user before
-        if (!userMap.has(record.memberId.id)) {
-          // Convert numeric gender to string (1 = male, others = female)
-          const gender = record.memberId.gender === 1 ? 'male' : 'female';
-          userMap.set(record.memberId.id, gender);
-        }
-      }
-    });
 
-    // Calculate counts
+    // Map to keep only the first occurrence of each user
+    const userMap = new Map<number, 'male' | 'female' | 'unknown'>();
+
+    for (const record of records) {
+      const member = record.memberId;
+      if (member?.id != null && !userMap.has(member.id)) {
+        let gender: 'male' | 'female' | 'unknown';
+
+        if (member.gender === 1) gender = 'male';
+        else if (member.gender === 2) gender = 'female';
+        else gender = 'unknown';
+
+        userMap.set(member.id, gender);
+      }
+    }
+
     const total = userMap.size;
     const males = [...userMap.values()].filter(g => g === 'male').length;
     const females = [...userMap.values()].filter(g => g === 'female').length;
+    const unknown = total - males - females;
 
     return res.json({
       success: true,
       total,
       males,
-      females
+      females,
+      unknown
     });
 
   } catch (error) {
@@ -189,6 +191,8 @@ export async function getUserCounts(req: Request, res: Response) {
     });
   }
 }
+
+
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
   const stats = {
     clockIns: 0,
