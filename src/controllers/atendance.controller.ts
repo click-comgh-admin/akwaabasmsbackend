@@ -12,7 +12,7 @@ interface AttendanceRecord {
     phone?: string;
     firstname?: string;
     surname?: string;
-    gender?: string | null;  // Explicitly show gender can be null
+    gender?: number
   };
   meetingEventId?: {
     latenessTime?: string;
@@ -153,16 +153,14 @@ export async function getUserCounts(req: Request, res: Response) {
     const records = response.data?.results || [];
     
     // Create a map to track unique users and their genders
-    const userMap = new Map<number, string>(); // Using user ID as key
+    const userMap = new Map<number, 'male' | 'female' | 'unknown'>(); // Using user ID as key
     
     records.forEach((record: AttendanceRecord) => {
       if (record.memberId?.id) {
         // Only process if we haven't seen this user before
         if (!userMap.has(record.memberId.id)) {
-          // Normalize gender (handle null/undefined, convert to lowercase)
-          const gender = record.memberId.gender 
-            ? record.memberId.gender.toLowerCase().trim() 
-            : 'unknown';
+          // Convert numeric gender to string (1 = male, others = female)
+          const gender = record.memberId.gender === 1 ? 'male' : 'female';
           userMap.set(record.memberId.id, gender);
         }
       }
@@ -172,14 +170,12 @@ export async function getUserCounts(req: Request, res: Response) {
     const total = userMap.size;
     const males = [...userMap.values()].filter(g => g === 'male').length;
     const females = [...userMap.values()].filter(g => g === 'female').length;
-    const unknown = total - males - females;
 
     return res.json({
       success: true,
       total,
       males,
-      females,
-      unknown
+      females
     });
 
   } catch (error) {
@@ -193,7 +189,6 @@ export async function getUserCounts(req: Request, res: Response) {
     });
   }
 }
-
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
   const stats = {
     clockIns: 0,
