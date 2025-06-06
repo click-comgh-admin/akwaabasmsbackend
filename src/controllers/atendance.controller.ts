@@ -151,18 +151,19 @@ export async function getUserCounts(req: Request, res: Response) {
 
     const records = response.data?.results || [];
 
-    // Map to keep only the first occurrence of each user
     const userMap = new Map<number, 'male' | 'female' | 'unknown'>();
 
     for (const record of records) {
       const member = record.memberId;
       if (member?.id != null && !userMap.has(member.id)) {
-        let gender: 'male' | 'female' | 'unknown';
+        const genderNum = typeof member.gender === 'number' ? member.gender : null;
 
-        if (member.gender === 1) gender = 'male';
-        else if (member.gender === 2) gender = 'female';
+        let gender: 'male' | 'female' | 'unknown';
+        if (genderNum === 1) gender = 'male';
+        else if (genderNum === 2) gender = 'female';
         else gender = 'unknown';
 
+        console.log(`User ${member.id} → Gender raw: ${member.gender} → Mapped: ${gender}`);
         userMap.set(member.id, gender);
       }
     }
