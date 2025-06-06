@@ -12,7 +12,7 @@ interface AttendanceRecord {
     phone?: string;
     firstname?: string;
     surname?: string;
-    gender?: string;
+    gender?: string | null;  // Explicitly show gender can be null
   };
   meetingEventId?: {
     latenessTime?: string;
@@ -128,7 +128,6 @@ function calculateAdminStats(records: AttendanceRecord[], schedule: Schedule) {
   };
 }
 
-
 export async function getUserCounts(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
@@ -153,33 +152,34 @@ export async function getUserCounts(req: Request, res: Response) {
 
     const records = response.data?.results || [];
     
-    // Initialize counters
-    let total = 0;
-    let males = 0;
-    let females = 0;
-    const countedUserIds = new Set<number>();
-
+    // Create a map to track unique users and their genders
+    const userMap = new Map<number, string>(); // Using user ID as key
+    
     records.forEach((record: AttendanceRecord) => {
-      if (record.memberId?.id && !countedUserIds.has(record.memberId.id)) {
-        countedUserIds.add(record.memberId.id);
-        total++;
-
-        // Safely handle gender (might be null/undefined/not a string)
-        const gender = record.memberId.gender;
-        if (typeof gender === 'string') {
-          const normalizedGender = gender.toLowerCase().trim();
-          if (normalizedGender === 'male') males++;
-          else if (normalizedGender === 'female') females++;
+      if (record.memberId?.id) {
+        // Only process if we haven't seen this user before
+        if (!userMap.has(record.memberId.id)) {
+          // Normalize gender (handle null/undefined, convert to lowercase)
+          const gender = record.memberId.gender 
+            ? record.memberId.gender.toLowerCase().trim() 
+            : 'unknown';
+          userMap.set(record.memberId.id, gender);
         }
       }
     });
+
+    // Calculate counts
+    const total = userMap.size;
+    const males = [...userMap.values()].filter(g => g === 'male').length;
+    const females = [...userMap.values()].filter(g => g === 'female').length;
+    const unknown = total - males - females;
 
     return res.json({
       success: true,
       total,
       males,
       females,
-      unknown: total - males - females
+      unknown
     });
 
   } catch (error) {
