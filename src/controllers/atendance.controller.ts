@@ -129,7 +129,6 @@ function calculateAdminStats(records: AttendanceRecord[], schedule: Schedule) {
 }
 
 
-
 export async function getUserCounts(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
@@ -147,41 +146,39 @@ export async function getUserCounts(req: Request, res: Response) {
     const response = await axios.get(`${baseURL}/attendance/meeting-event/attendance`, {
       params: { 
         meetingEventId: scheduleId,
-        length: 1000
+        length: 1000 // Get enough records to count all users
       },
       headers: { Authorization: `Token ${valid.session.rawToken}` }
     });
 
     const records = response.data?.results || [];
     
-    // Count unique users and genders
-    const userMap = new Map<string, { gender?: string }>();
+    // Create a map to count unique users and their genders
+    const userGenderMap = new Map<number, string>();
     
     records.forEach((record: AttendanceRecord) => {
-      if (record.memberId?.phone) {
-        const userId = record.memberId.id?.toString() || record.memberId.phone;
-        if (!userMap.has(userId)) {
-          // Safely handle gender (might be null/undefined/not a string)
-          const gender = typeof record.memberId.gender === 'string' 
-            ? record.memberId.gender.toLowerCase() 
-            : 'unknown';
-            
-          userMap.set(userId, { gender });
+      if (record.memberId?.id) {
+        // Only count each user once
+        if (!userGenderMap.has(record.memberId.id)) {
+          // Default to 'unknown' if gender not specified
+          const gender = record.memberId.gender?.toLowerCase() || 'unknown';
+          userGenderMap.set(record.memberId.id, gender);
         }
       }
     });
 
     // Calculate counts
-    const total = userMap.size;
-    const males = Array.from(userMap.values()).filter(u => u.gender === 'male').length;
-    const females = Array.from(userMap.values()).filter(u => u.gender === 'female').length;
+    const total = userGenderMap.size;
+    const males = Array.from(userGenderMap.values()).filter(g => g === 'male').length;
+    const females = Array.from(userGenderMap.values()).filter(g => g === 'female').length;
+    const unknown = total - males - females;
 
     return res.json({
       success: true,
       total,
       males,
       females,
-      unknown: total - males - females
+      unknown
     });
 
   } catch (error) {
@@ -195,7 +192,6 @@ export async function getUserCounts(req: Request, res: Response) {
     });
   }
 }
-
 
 
 function calculateUserStats(records: AttendanceRecord[], schedule: Schedule) {
