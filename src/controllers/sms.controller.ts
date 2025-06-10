@@ -17,7 +17,6 @@ interface HubtelSMSParams {
   from: string;
   to: string;
   content: string;
-  partIndicator?: string;
 }
 
 interface SMSRequest {
@@ -33,7 +32,6 @@ interface SMSRequest {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
-const MAX_SMS_LENGTH = 160;
 const MAX_SENDER_LENGTH = 11;
 const MAX_RECIPIENTS_PER_BATCH = 100;
 
@@ -128,7 +126,7 @@ async function processRecipientsBatch(
     logEntry.frequency = params.frequency;
     logEntry.scheduleId = params.scheduleId || 0;
     logEntry.isAdmin = params.isAdmin;
-   if ('clientCode' in logEntry) {
+    if ('clientCode' in logEntry) {
       logEntry.clientCode = params.clientCode;
     }
 
@@ -148,31 +146,16 @@ async function processRecipientsBatch(
         }
       }
 
-      const messageParts = splitMessage(params.content);
-      let allPartsSent = true;
-      let messageId = '';
+      const smsParams: HubtelSMSParams = {
+        from: params.from,
+        to: formattedPhone,
+        content: params.content
+      };
 
-      for (const [index, part] of messageParts.entries()) {
-        const smsParams: HubtelSMSParams = {
-          from: params.from,
-          to: formattedPhone,
-          content: part
-        };
+      const hubtelResponse = await smsService.sendSMS(smsParams) as HubtelResponse;
 
-        if (messageParts.length > 1) {
-          smsParams.partIndicator = `${index+1}/${messageParts.length}`;
-        }
-
-        const hubtelResponse = await smsService.sendSMS(smsParams) as HubtelResponse;
-
-        if (!hubtelResponse || hubtelResponse.Status !== "0") {
-          allPartsSent = false;
-          throw new Error(hubtelResponse?.Message || "SMS gateway error");
-        }
-
-        if (index === 0) {
-          messageId = hubtelResponse.MessageId;
-        }
+      if (!hubtelResponse || hubtelResponse.Status !== "0") {
+        throw new Error(hubtelResponse?.Message || "SMS gateway error");
       }
 
       if (!params.isAdmin) {
@@ -185,13 +168,13 @@ async function processRecipientsBatch(
       }
 
       logEntry.status = 'sent';
-      logEntry.messageId = messageId;
+      logEntry.messageId = hubtelResponse.MessageId;
       await logEntry.save();
 
       return { 
         phone: formattedPhone, 
         success: true,
-        parts: messageParts.length
+        parts: 1
       };
     } catch (error) {
       logEntry.status = 'failed';
@@ -259,34 +242,14 @@ export const getSMSLogs = async (req: Request, res: Response) => {
   }
 };
 
-function splitMessage(text: string): string[] {
-  if (text.length <= MAX_SMS_LENGTH) return [text];
-
-  const naturalBreaks = text.split(/(?<=[.!?])\s+|(?<=\n)/);
-  const parts: string[] = [];
-  let currentPart = "";
-
-  for (const segment of naturalBreaks) {
-    if (currentPart.length + segment.length + 1 <= MAX_SMS_LENGTH) {
-      currentPart += (currentPart ? " " : "") + segment;
-    } else {
-      if (currentPart) parts.push(currentPart);
-      currentPart = segment.substring(0, MAX_SMS_LENGTH);
-    }
-  }
-
-  if (currentPart) parts.push(currentPart);
-  return parts;
-}
-
 function formatPhoneNumber(phone: string): string | null {
   if (!phone) return null;
   const cleaned = phone.replace(/\D/g, '');
-  
+
   if (cleaned.match(/^0\d{9}$/)) return `+233${cleaned.substring(1)}`;
   if (cleaned.match(/^233\d{9}$/)) return `+${cleaned}`;
   if (cleaned.match(/^\+\d{10,15}$/)) return phone;
   if (cleaned.match(/^\d{10,15}$/)) return `+${cleaned}`;
-  
+
   return null;
 }

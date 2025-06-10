@@ -33,9 +33,6 @@ export class HubtelSMS {
     to: string;
     content: string;
   }): Promise<HubtelResponse> {
-    if (params.content.length > 160) {
-      throw new Error('Message content exceeds maximum length of 160 characters');
-    }
 
     try {
       const response = await this.makeHubtelRequest(params);
