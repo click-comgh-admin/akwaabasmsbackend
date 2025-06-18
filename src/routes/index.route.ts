@@ -21,7 +21,7 @@ import {
   addAdminContact 
 } from "../controllers/admin-contact.controller";
 import { getAvailableSchedules, getScheduleDetails, getUsersPerSchedule } from "../controllers/schedule.controller";
-import { getSMSLogs, sendSMS } from "../controllers/sms.controller";
+import { getSMSLogs, createScheduledMessages,getScheduledMessages, cancelScheduledMessage } from "../controllers/sms.controller";
 import { forwardRequest } from "../controllers/forwarder.controller";
 
 const router = express.Router();
@@ -123,14 +123,14 @@ router.get("/schedules/users", getUsersPerSchedule);
 // @desc    Send an SMS message to a user and store their recipient record
 // @body    { from, to, content, frequency, scheduleId, isAdmin }
 // @access  Protected (requires authToken cookie)
-router.post("/sms/send", sendSMS);
 
 // @route   GET /api/sms/logs
 // @desc    Retrieve a list of all previously sent SMS logs (latest first)
 // @access  Protected (requires authToken cookie)
 router.get("/sms/logs", getSMSLogs);
-
-
+router.post("/sms/scheduled-messages", createScheduledMessages);
+router.get("/sms/scheduled-messages", getScheduledMessages);
+router.put("/sms/scheduled-messages/:id/cancel", cancelScheduledMessage);
 //
 // 🌐 API FORWARDER ROUTE
 //
