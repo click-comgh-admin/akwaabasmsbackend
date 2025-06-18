@@ -1,8 +1,8 @@
-// entities/ScheduledMessage.ts
+// src/entities/ScheduledMessage.ts
 import { Entity, PrimaryGeneratedColumn, Column } from "typeorm";
 import { MessageType } from "./Recipient";
 
-@Entity()
+@Entity("scheduled_message") 
 export class ScheduledMessage {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -14,29 +14,37 @@ export class ScheduledMessage {
   content!: string;
 
   @Column()
-  frequency!: string; 
+  frequency!: string;
 
-  @Column({ type: 'timestamp' })
+  @Column({ name: 'start_date', type: 'timestamp without time zone' })
   startDate!: Date;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'end_date', type: 'timestamp without time zone', nullable: true })
   endDate!: Date | null;
 
   @Column({ default: true })
   active!: boolean;
 
-  @Column()
+  @Column({ name: 'is_admin' })
   isAdmin!: boolean;
 
-  @Column({ nullable: true })
+  @Column({ name: 'schedule_id', nullable: true })
   scheduleId!: number;
 
-  @Column()
+  @Column({ name: 'client_code' })
   clientCode!: string;
 
-  @Column({ type: 'enum', enum: MessageType })
+  @Column({ 
+    name: 'message_type',
+    type: 'varchar',
+    enum: ['Admin Summary', 'User Summary']
+  })
   messageType!: MessageType;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ 
+    name: 'created_at',
+    type: 'timestamp without time zone',
+    default: () => 'CURRENT_TIMESTAMP'
+  })
   createdAt!: Date;
 }
