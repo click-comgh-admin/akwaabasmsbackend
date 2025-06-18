@@ -136,14 +136,27 @@ async function processRecipientsBatch(
         throw new Error("Invalid phone number format");
       }
 
-      if (!params.isAdmin) {
-        const existing = await Recipient.findOneBy({
-          phone: formattedPhone,
-          scheduleId: Number(params.scheduleId),
-        });
-        if (existing) {
-          throw new Error("Recipient already exists for this schedule");
-        }
+      // Check for existing recipient (for both admin and user messages)
+      const existing = await Recipient.findOneBy({
+        phone: formattedPhone,
+        scheduleId: params.isAdmin ? 0 : Number(params.scheduleId), // Admins use scheduleId=0
+        messageType: params.isAdmin ? MessageType.ADMIN_SUMMARY : MessageType.USER_SUMMARY
+      });
+      
+      if (existing) {
+        // Update existing recipient instead of throwing error
+        existing.lastSent = new Date();
+        existing.frequency = params.frequency;
+        await existing.save();
+      } else {
+        // Create new recipient for both admin and user messages
+        await createRecipient(
+          formattedPhone,
+          params.frequency,
+          params.isAdmin ? 0 : params.scheduleId, // Admins get scheduleId=0
+          params.clientCode,
+          params.isAdmin
+        );
       }
 
       const smsParams: HubtelSMSParams = {
@@ -156,15 +169,6 @@ async function processRecipientsBatch(
 
       if (!hubtelResponse || hubtelResponse.Status !== "0") {
         throw new Error(hubtelResponse?.Message || "SMS gateway error");
-      }
-
-      if (!params.isAdmin) {
-        await createRecipient(
-          formattedPhone,
-          params.frequency,
-          params.scheduleId,
-          params.clientCode
-        );
       }
 
       logEntry.status = 'sent';
@@ -194,18 +198,20 @@ async function createRecipient(
   phone: string,
   frequency: string,
   scheduleId?: number,
-  clientCode?: string
+  clientCode?: string,
+  isAdmin: boolean = false
 ) {
   const recipient = new Recipient();
   recipient.phone = phone;
   recipient.frequency = frequency;
   recipient.lastSent = new Date();
-  recipient.scheduleId = Number(scheduleId);
-  recipient.messageType = MessageType.USER_SUMMARY;
+  recipient.scheduleId = isAdmin ? 0 : Number(scheduleId); // Admins get scheduleId=0
+  recipient.messageType = isAdmin ? MessageType.ADMIN_SUMMARY : MessageType.USER_SUMMARY;
   recipient.clientCode = clientCode;
-  recipient.isAdmin = false;
+  recipient.isAdmin = isAdmin;
   await recipient.save();
 }
+
 
 export const getSMSLogs = async (req: Request, res: Response) => {
   const valid = validateSession(req, res);
