@@ -46,7 +46,6 @@ export class SchedulerService {
           startDate: LessThanOrEqual(todayEnd),
           endDate: MoreThanOrEqual(todayStart) 
         },
-        // Replace 'priority' with a valid property of ScheduledMessage, e.g., 'id' or another sortable field
         order: { id: "desc" } // Replace with a valid property to sort messages
       });
 
