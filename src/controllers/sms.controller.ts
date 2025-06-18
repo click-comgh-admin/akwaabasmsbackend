@@ -1,11 +1,12 @@
 import { Request, Response } from "express";
+import { AppDataSource } from "../config/data-source";
 import { SMSLog } from "../entities/SMSLog";
-import { MessageType, Recipient } from "../entities/Recipient";
+import { Recipient } from "../entities/Recipient";
+import { ScheduledMessage } from "../entities/ScheduledMessage";
 import { HubtelSMS } from "../services/sms.service";
 import { validateSession } from "../utils/validateSession";
-import { ScheduledMessage } from "../entities/ScheduledMessage";
-import { getRepository, LessThanOrEqual, MoreThanOrEqual } from "typeorm";
-import { isToday, addDays, isSameDay, isSameMonth, differenceInDays } from "date-fns";
+import { isToday, differenceInDays, isSameDay, isSameMonth } from "date-fns";
+import { MessageType } from "../entities/Recipient";
 
 interface HubtelResponse {
   Status: string;
@@ -20,17 +21,6 @@ interface HubtelSMSParams {
   content: string;
 }
 
-interface SMSRequest {
-  from: string;
-  to: string | string[];
-  content: string;
-  frequency: string;
-  scheduleId?: number;
-  isAdmin: boolean;
-  clientCode?: string;
-  orgName?: string;
-}
-
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 const MAX_SENDER_LENGTH = 11;
@@ -40,15 +30,7 @@ export async function createScheduledMessages(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;
 
-  const { 
-    recipients, 
-    content, 
-    frequency, 
-    startDate, 
-    endDate, 
-    isAdmin, 
-    scheduleId 
-  } = req.body;
+  const { recipients, content, frequency, startDate, endDate, isAdmin, scheduleId } = req.body;
 
   if (!recipients || !content || !frequency || !startDate) {
     return res.status(400).json({
@@ -58,12 +40,8 @@ export async function createScheduledMessages(req: Request, res: Response) {
   }
 
   try {
-    const smsService = new HubtelSMS(
-      process.env.HUBTEL_CLIENT_ID!,
-      process.env.HUBTEL_CLIENT_SECRET!
-    );
-
-    const scheduledMessages = [];
+    const smsService = new HubtelSMS(process.env.HUBTEL_CLIENT_ID!, process.env.HUBTEL_CLIENT_SECRET!);
+    const scheduledMessages: ScheduledMessage[] = [];
     const immediateSends = [];
     const today = new Date();
     const startDateTime = new Date(startDate);
@@ -81,36 +59,31 @@ export async function createScheduledMessages(req: Request, res: Response) {
       message.messageType = isAdmin ? MessageType.ADMIN_SUMMARY : MessageType.USER_SUMMARY;
       message.active = true;
 
-      // If start date is today, send immediately
       if (isToday(startDateTime)) {
         try {
           const formattedPhone = formatPhoneNumber(phone);
-          if (!formattedPhone) {
-            throw new Error("Invalid phone number format");
-          }
+          if (!formattedPhone) throw new Error("Invalid phone number format");
 
-          const smsParams: HubtelSMSParams = {
+          const hubtelResponse = await smsService.sendSMS({
             from: 'AKWAABA',
             to: formattedPhone,
             content: content
-          };
-
-          const hubtelResponse = await smsService.sendSMS(smsParams) as HubtelResponse;
+          }) as HubtelResponse;
 
           if (!hubtelResponse || hubtelResponse.Status !== "0") {
             throw new Error(hubtelResponse?.Message || "SMS gateway error");
           }
 
-          // Create recipient record
-          await createRecipient(
-            formattedPhone,
-            frequency,
-            isAdmin ? 0 : scheduleId,
-            valid.session.clientCode,
-            isAdmin
-          );
+          const recipient = new Recipient();
+          recipient.phone = formattedPhone;
+          recipient.frequency = frequency;
+          recipient.lastSent = new Date();
+          recipient.scheduleId = isAdmin ? 0 : Number(scheduleId);
+          recipient.messageType = isAdmin ? MessageType.ADMIN_SUMMARY : MessageType.USER_SUMMARY;
+          recipient.clientCode = valid.session.clientCode;
+          recipient.isAdmin = isAdmin;
+          await AppDataSource.manager.save(recipient);
 
-          // Log the successful send
           const logEntry = new SMSLog();
           logEntry.recipient = formattedPhone;
           logEntry.content = content;
@@ -121,28 +94,28 @@ export async function createScheduledMessages(req: Request, res: Response) {
           logEntry.isAdmin = isAdmin;
           logEntry.clientCode = valid.session.clientCode;
           logEntry.messageId = hubtelResponse.MessageId;
-          await logEntry.save();
+          await AppDataSource.manager.save(logEntry);
 
           immediateSends.push({
             phone: formattedPhone,
             success: true,
             messageId: hubtelResponse.MessageId
           });
-        } catch (error) {
+        } catch (error: unknown) {
+          const err = error as Error;
           immediateSends.push({
             phone,
             success: false,
-            error: (error as Error).message
+            error: err.message
           });
-          continue; // Continue with scheduling even if immediate send fails
+          continue;
         }
       }
 
       scheduledMessages.push(message);
     }
 
-    // Save all scheduled messages
-    await getRepository(ScheduledMessage).save(scheduledMessages);
+    await AppDataSource.manager.save(scheduledMessages);
 
     return res.json({
       success: true,
@@ -150,11 +123,12 @@ export async function createScheduledMessages(req: Request, res: Response) {
       immediateSends,
       data: scheduledMessages
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     return res.status(500).json({
       success: false,
       error: "Failed to schedule messages",
-      details: (error as Error).message
+      details: err.message
     });
   }
 }
@@ -166,19 +140,13 @@ export async function getScheduledMessages(req: Request, res: Response) {
   const { active, phone, frequency } = req.query;
 
   try {
-    const query = getRepository(ScheduledMessage)
-      .createQueryBuilder('message')
+    const scheduledMessageRepo = AppDataSource.getRepository(ScheduledMessage);
+    let query = scheduledMessageRepo.createQueryBuilder('message')
       .where('message.clientCode = :clientCode', { clientCode: valid.session.clientCode });
 
-    if (active !== undefined) {
-      query.andWhere('message.active = :active', { active: active === 'true' });
-    }
-    if (phone) {
-      query.andWhere('message.phone LIKE :phone', { phone: `%${phone}%` });
-    }
-    if (frequency) {
-      query.andWhere('message.frequency = :frequency', { frequency });
-    }
+    if (active !== undefined) query = query.andWhere('message.active = :active', { active: active === 'true' });
+    if (phone) query = query.andWhere('message.phone LIKE :phone', { phone: `%${phone}%` });
+    if (frequency) query = query.andWhere('message.frequency = :frequency', { frequency });
 
     const messages = await query.getMany();
     return res.json({
@@ -186,11 +154,12 @@ export async function getScheduledMessages(req: Request, res: Response) {
       count: messages.length,
       data: messages
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     return res.status(500).json({
       success: false,
       error: "Failed to fetch scheduled messages",
-      details: (error as Error).message
+      details: err.message
     });
   }
 }
@@ -202,7 +171,8 @@ export async function cancelScheduledMessage(req: Request, res: Response) {
   const { id } = req.params;
 
   try {
-    const result = await getRepository(ScheduledMessage)
+    const scheduledMessageRepo = AppDataSource.getRepository(ScheduledMessage);
+    const result = await scheduledMessageRepo
       .createQueryBuilder()
       .update()
       .set({ active: false })
@@ -223,11 +193,12 @@ export async function cancelScheduledMessage(req: Request, res: Response) {
       success: true,
       message: "Scheduled message cancelled"
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     return res.status(500).json({
       success: false,
       error: "Failed to cancel scheduled message",
-      details: (error as Error).message
+      details: err.message
     });
   }
 }
@@ -240,15 +211,16 @@ export const getSMSLogs = async (req: Request, res: Response) => {
   const { clientCode } = valid.session;
 
   try {
-    const queryBuilder = SMSLog.createQueryBuilder('log')
+    const smsLogRepo = AppDataSource.getRepository(SMSLog);
+    let queryBuilder = smsLogRepo.createQueryBuilder('log')
       .where('log.clientCode = :clientCode', { clientCode })
       .orderBy('log.sentAt', 'DESC')
       .take(Math.min(Number(limit), 500));
 
-    if (status) queryBuilder.andWhere('log.status = :status', { status });
-    if (phone) queryBuilder.andWhere('log.recipient LIKE :phone', { phone: `%${phone}%` });
-    if (startDate) queryBuilder.andWhere('log.sentAt >= :startDate', { startDate });
-    if (endDate) queryBuilder.andWhere('log.sentAt <= :endDate', { endDate });
+    if (status) queryBuilder = queryBuilder.andWhere('log.status = :status', { status });
+    if (phone) queryBuilder = queryBuilder.andWhere('log.recipient LIKE :phone', { phone: `%${phone}%` });
+    if (startDate) queryBuilder = queryBuilder.andWhere('log.sentAt >= :startDate', { startDate });
+    if (endDate) queryBuilder = queryBuilder.andWhere('log.sentAt <= :endDate', { endDate });
 
     const logs = await queryBuilder.getMany();
     return res.json({
@@ -256,33 +228,96 @@ export const getSMSLogs = async (req: Request, res: Response) => {
       count: logs.length,
       data: logs,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as Error;
     return res.status(500).json({
       success: false,
       error: "Failed to fetch logs",
-      details: process.env.NODE_ENV === "development" 
-        ? (error as Error).message 
-        : undefined,
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 };
 
-async function createRecipient(
-  phone: string,
-  frequency: string,
-  scheduleId?: number,
-  clientCode?: string,
-  isAdmin: boolean = false
-) {
-  const recipient = new Recipient();
-  recipient.phone = phone;
-  recipient.frequency = frequency;
-  recipient.lastSent = new Date();
-  recipient.scheduleId = isAdmin ? 0 : Number(scheduleId);
-  recipient.messageType = isAdmin ? MessageType.ADMIN_SUMMARY : MessageType.USER_SUMMARY;
-  recipient.clientCode = clientCode;
-  recipient.isAdmin = isAdmin;
-  await recipient.save();
+export async function processScheduledMessages() {
+  const today = new Date();
+  
+  try {
+    const scheduledMessageRepo = AppDataSource.getRepository(ScheduledMessage);
+    const messages = await scheduledMessageRepo
+      .createQueryBuilder('message')
+      .where('message.active = :active', { active: true })
+      .andWhere('message.startDate <= :today', { today })
+      .andWhere('(message.endDate IS NULL OR message.endDate >= :today)', { today })
+      .getMany();
+
+    const smsService = new HubtelSMS(process.env.HUBTEL_CLIENT_ID!, process.env.HUBTEL_CLIENT_SECRET!);
+
+    for (const message of messages) {
+      if (!shouldSendToday(message, today)) continue;
+
+      try {
+        const formattedPhone = formatPhoneNumber(message.phone);
+        if (!formattedPhone) throw new Error("Invalid phone number format");
+
+        const hubtelResponse = await smsService.sendSMS({
+          from: 'AKWAABA',
+          to: formattedPhone,
+          content: message.content
+        }) as HubtelResponse;
+
+        if (!hubtelResponse || hubtelResponse.Status !== "0") {
+          throw new Error(hubtelResponse?.Message || "SMS gateway error");
+        }
+
+        const recipient = new Recipient();
+        recipient.phone = formattedPhone;
+        recipient.frequency = message.frequency;
+        recipient.lastSent = new Date();
+        recipient.scheduleId = message.scheduleId;
+        recipient.messageType = message.messageType;
+        recipient.clientCode = message.clientCode;
+        recipient.isAdmin = message.isAdmin;
+        await AppDataSource.manager.save(recipient);
+
+        const logEntry = new SMSLog();
+        logEntry.recipient = formattedPhone;
+        logEntry.content = message.content;
+        logEntry.status = 'sent';
+        logEntry.sentAt = new Date();
+        logEntry.frequency = message.frequency;
+        logEntry.scheduleId = message.scheduleId;
+        logEntry.isAdmin = message.isAdmin;
+        logEntry.clientCode = message.clientCode;
+        logEntry.messageId = hubtelResponse.MessageId;
+        await AppDataSource.manager.save(logEntry);
+      } catch (error: unknown) {
+        const err = error as Error;
+        console.error(`Failed to process scheduled message ${message.id}: ${err.message}`);
+      }
+    }
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error(`Error in scheduled message processing: ${err.message}`);
+  }
+}
+
+function shouldSendToday(message: ScheduledMessage, today: Date): boolean {
+  const daysSinceStart = differenceInDays(today, message.startDate);
+  
+  switch (message.frequency.toLowerCase()) {
+    case 'daily': return true;
+    case 'weekly': return daysSinceStart % 7 === 0;
+    case 'monthly': return isSameDay(today, message.startDate) && isSameMonth(today, message.startDate);
+    case 'quarterly': return isSameQuarter(today, message.startDate) && isSameDay(today, message.startDate);
+    case 'annually': return isSameMonth(today, message.startDate) && isSameDay(today, message.startDate);
+    default: return false;
+  }
+}
+
+function isSameQuarter(date1: Date, date2: Date): boolean {
+  const quarter1 = Math.floor(date1.getMonth() / 3);
+  const quarter2 = Math.floor(date2.getMonth() / 3);
+  return quarter1 === quarter2;
 }
 
 function formatPhoneNumber(phone: string): string | null {
@@ -295,101 +330,4 @@ function formatPhoneNumber(phone: string): string | null {
   if (cleaned.match(/^\d{10,15}$/)) return `+${cleaned}`;
 
   return null;
-}
-
-// Scheduled message processing (should be called by a cron job)
-export async function processScheduledMessages() {
-  const today = new Date();
-  
-  try {
-    const messages = await getRepository(ScheduledMessage)
-      .createQueryBuilder('message')
-      .where('message.active = :active', { active: true })
-      .andWhere('message.startDate <= :today', { today })
-      .andWhere('(message.endDate IS NULL OR message.endDate >= :today)', { today })
-      .getMany();
-
-    const smsService = new HubtelSMS(
-      process.env.HUBTEL_CLIENT_ID!,
-      process.env.HUBTEL_CLIENT_SECRET!
-    );
-
-    for (const message of messages) {
-      if (!shouldSendToday(message, today)) continue;
-
-      try {
-        const formattedPhone = formatPhoneNumber(message.phone);
-        if (!formattedPhone) {
-          throw new Error("Invalid phone number format");
-        }
-
-        const smsParams: HubtelSMSParams = {
-          from: 'AKWAABA',
-          to: formattedPhone,
-          content: message.content
-        };
-
-        const hubtelResponse = await smsService.sendSMS(smsParams) as HubtelResponse;
-
-        if (!hubtelResponse || hubtelResponse.Status !== "0") {
-          throw new Error(hubtelResponse?.Message || "SMS gateway error");
-        }
-
-        // Update recipient record
-        await createRecipient(
-          formattedPhone,
-          message.frequency,
-          message.scheduleId,
-          message.clientCode,
-          message.isAdmin
-        );
-
-        // Log the successful send
-        const logEntry = new SMSLog();
-        logEntry.recipient = formattedPhone;
-        logEntry.content = message.content;
-        logEntry.status = 'sent';
-        logEntry.sentAt = new Date();
-        logEntry.frequency = message.frequency;
-        logEntry.scheduleId = message.scheduleId;
-        logEntry.isAdmin = message.isAdmin;
-        logEntry.clientCode = message.clientCode;
-        logEntry.messageId = hubtelResponse.MessageId;
-        await logEntry.save();
-
-      } catch (error) {
-        console.error(`Failed to process scheduled message ${message.id}: ${(error as Error).message}`);
-      }
-    }
-  } catch (error) {
-    console.error(`Error in scheduled message processing: ${(error as Error).message}`);
-  }
-}
-
-function shouldSendToday(message: ScheduledMessage, today: Date): boolean {
-  const daysSinceStart = differenceInDays(today, message.startDate);
-  
-  switch (message.frequency.toLowerCase()) {
-    case 'daily':
-      return true;
-    case 'weekly':
-      return daysSinceStart % 7 === 0;
-    case 'monthly':
-      return isSameDay(today, message.startDate) && 
-             isSameMonth(today, message.startDate);
-    case 'quarterly':
-      return isSameQuarter(today, message.startDate) &&
-             isSameDay(today, message.startDate);
-    case 'annually':
-      return isSameMonth(today, message.startDate) &&
-             isSameDay(today, message.startDate);
-    default:
-      return false;
-  }
-}
-
-function isSameQuarter(date1: Date, date2: Date): boolean {
-  const quarter1 = Math.floor(date1.getMonth() / 3);
-  const quarter2 = Math.floor(date2.getMonth() / 3);
-  return quarter1 === quarter2;
 }

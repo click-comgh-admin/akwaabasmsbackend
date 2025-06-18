@@ -5,7 +5,7 @@ import { CronLog } from "../entities/CronLog";
 import { Schedule } from "../entities/Schedule";
 import { Recipient } from "../entities/Recipient";
 import { SMSLog } from "../entities/SMSLog";
-
+import { ScheduledMessage } from "../entities/ScheduledMessage";
 dotenv.config();
 
 console.log("📦 Loaded Environment Variables:");
@@ -37,7 +37,8 @@ export const AppDataSource = new DataSource({
     Schedule,
     Recipient,
     SMSLog,
-    CronLog
+    CronLog,
+    ScheduledMessage,
   ],
   migrations: [
     "dist/migrations/**/*.js",
