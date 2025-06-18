@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { AppDataSource } from "../config/data-source";
+import { AppDataSource, initializeDB } from "../config/data-source";
 import { SMSLog } from "../entities/SMSLog";
 import { Recipient } from "../entities/Recipient";
 import { ScheduledMessage } from "../entities/ScheduledMessage";
@@ -25,6 +25,8 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 const MAX_SENDER_LENGTH = 11;
 const MAX_RECIPIENTS_PER_BATCH = 100;
+
+
 
 export async function createScheduledMessages(req: Request, res: Response) {
   const valid = validateSession(req, res);
@@ -132,7 +134,14 @@ export async function createScheduledMessages(req: Request, res: Response) {
     });
   }
 }
-
+(async () => {
+  try {
+    await initializeDB();
+  } catch (err) {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
+  }
+})();
 export async function getScheduledMessages(req: Request, res: Response) {
   const valid = validateSession(req, res);
   if (!valid) return;

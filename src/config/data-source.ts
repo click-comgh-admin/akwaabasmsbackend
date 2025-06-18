@@ -46,3 +46,15 @@ export const AppDataSource = new DataSource({
   synchronize: false,
   logging: true, // Enable logging to debug
 });
+
+export async function initializeDB() {
+  try {
+    await AppDataSource.initialize();
+    console.log("Database connected successfully!");
+    console.log("Registered entities:", 
+      AppDataSource.entityMetadatas.map(e => e.name));
+  } catch (error) {
+      console.error("Database connection failed:", error);
+      throw error;
+    }
+  }
