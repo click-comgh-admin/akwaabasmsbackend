@@ -3,10 +3,13 @@ import { Pool } from "pg";
 import { validateSession } from "../utils/validateSession";
 
 const pool = new Pool({
-    connectionString: "postgresql://absenteecontact_user:9qBL6rW6nOx9fRC5SSw6hwRHydg49mPz@dpg-d0vpqobipnbc7385qgj0-a.oregon-postgres.render.com/absenteecontact",
+    connectionString: "postgresql://absenteecontact_9yin_user:c6pkkBu1A7L6kaBgBMSdHQo8a1alb8kr@dpg-d20g1sffte5s738set4g-a.oregon-postgres.render.com/absenteecontact_9yin",
     ssl: {
         rejectUnauthorized: false,
     },
+    max: 10, // Recommended for Render's free tier
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000
 });
 
 export async function getContact(req: Request, res: Response) {
