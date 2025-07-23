@@ -107,7 +107,8 @@ private calculateNextSend(frequency: string, time: string, lastSent?: Date): Dat
         },
         headers: {
           Authorization: `Token ${this.apiToken}`
-        }
+        },
+        timeout: 300000
       });
 
       const userRecord = response.data.results.find((r: any) => 

@@ -92,6 +92,8 @@ export async function getUsersPerSchedule(req: Request, res: Response) {
         headers: {
           Authorization: `Token ${rawToken}`,
         },
+                timeout: 300000 
+
       }
     );
 

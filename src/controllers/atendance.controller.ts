@@ -61,16 +61,17 @@ export async function getAttendanceStats(req: Request, res: Response) {
     const [scheduleRes, attendanceRes] = await Promise.all([
       axios.get<Schedule>(`${baseURL}/attendance/meeting-event/schedule/${scheduleId}`, { headers }),
       axios.get<{ results: AttendanceRecord[] }>(
-        `${baseURL}/attendance/meeting-event/attendance`,
-        { 
-          headers,
-          params: {
-            start_date: startDate,
-            end_date: endDate,
-            meetingEventId: scheduleId,
-            length: 1000
-          }
-        }
+      `${baseURL}/attendance/meeting-event/attendance`,
+      { 
+        headers,
+        params: {
+        start_date: startDate,
+        end_date: endDate,
+        meetingEventId: scheduleId,
+        length: 1000
+        },
+        timeout: 300000 
+      }
       )
     ]);
 
