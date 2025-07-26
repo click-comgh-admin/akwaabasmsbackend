@@ -57,7 +57,7 @@ export async function forwardRequest(req: Request, res: Response) {
       headers,
       params: req.query,
       data: req.body,
-      timeout: 120_000,
+      timeout: 600_000,
       httpsAgent,
     });
 
